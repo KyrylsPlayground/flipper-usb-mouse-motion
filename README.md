@@ -1,4 +1,6 @@
-# USB Mouse Motion 1.5.1
+# USB Mouse Motion 1.5.2
+
+Menu icon: custom 10x10 monochrome mouse with a sparkle (`usb_mouse_motion.png`).
 
 - Area X/Y: full width/height, independently 50..1000 relative HID counts (not pixels).
   Bounds are [-X/2,+X/2] and [-Y/2,+Y/2] about the fixed center.
