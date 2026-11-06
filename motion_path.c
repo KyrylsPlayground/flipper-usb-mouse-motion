@@ -2,6 +2,13 @@
 #include <math.h>
 
 #define MOTION_TAU 6.28318530718f
+#define PATH_SEGMENTS 6U
+
+typedef struct
+{
+    float x;
+    float y;
+} PathAnchor;
 
 static float motion_random(uint32_t* seed)
 {
@@ -11,52 +18,74 @@ static float motion_random(uint32_t* seed)
     return (float)(*seed & 0xFFFFU) / 65535.0f;
 }
 
+static float motion_interpolate(float a, float b, float c, float d, float t)
+{
+    return 0.5f * (2.0f * b + (c - a) * t +
+                   (2.0f * a - 5.0f * b + 4.0f * c - d) * t * t +
+                   (-a + 3.0f * b - 3.0f * c + d) * t * t * t);
+}
+
 void motion_path_generate(MotionPath* path, uint16_t radius, uint32_t seed)
 {
     if (seed == 0U)
     {
         seed = 1U;
     }
-    const float phase_x = motion_random(&seed) * MOTION_TAU;
-    const float phase_y = motion_random(&seed) * MOTION_TAU;
-    const float harmonic_x = 0.25f + motion_random(&seed) * 0.5f;
-    const float harmonic_y = 0.25f + motion_random(&seed) * 0.5f;
-    const float angle = motion_random(&seed) * MOTION_TAU;
+    PathAnchor anchors[PATH_SEGMENTS + 1U] =
+    {
+        0
+    };
+    float angle = motion_random(&seed) * MOTION_TAU;
     const float direction = motion_random(&seed) < 0.5f ? -1.0f : 1.0f;
-    const float rotation_x = cosf(angle);
-    const float rotation_y = sinf(angle);
-    float max_distance = 1.0f;
-
-    path->points[0] = (MotionPoint)
+    for (uint16_t i = 1U; i < PATH_SEGMENTS; i++)
     {
-        0, 0
-    };
-    // Harmonics share the same period: both position and tangent close smoothly.
-    for (uint16_t i = 1U; i < MOTION_PATH_STEPS; i++)
-    {
-        const float t = direction * MOTION_TAU * i / MOTION_PATH_STEPS;
-        const float x = sinf(t) + harmonic_x * (sinf(2.0f * t + phase_x) - sinf(phase_x));
-        const float y = cosf(t) - 1.0f + harmonic_y * (sinf(3.0f * t + phase_y) - sinf(phase_y));
-        const float rotated_x = (x * rotation_x - y * rotation_y) * 4096.0f;
-        const float rotated_y = (x * rotation_y + y * rotation_x) * 4096.0f;
-        path->points[i].x = (int16_t)lroundf(rotated_x);
-        path->points[i].y = (int16_t)lroundf(rotated_y);
-        const float distance = hypotf(path->points[i].x, path->points[i].y);
-        if (distance > max_distance)
+        angle += direction * (0.7f + motion_random(&seed) * 0.9f);
+        const float distance = radius * (0.25f + motion_random(&seed) * 0.55f);
+        anchors[i] = (PathAnchor)
         {
-            max_distance = distance;
-        }
+            cosf(angle) * distance, sinf(angle) * distance
+        };
     }
-
-    // Leave one count for rounding so the requested radius is never exceeded.
-    const float scale = (radius > 0U ? radius - 1U : 0U) / max_distance;
-    for (uint16_t i = 1U; i < MOTION_PATH_STEPS; i++)
+    // A small final correction ends near the origin instead of snapping exactly back.
+    const float error_angle = motion_random(&seed) * MOTION_TAU;
+    const float error_radius = 1.0f + motion_random(&seed) * 4.0f;
+    anchors[PATH_SEGMENTS] = (PathAnchor)
     {
-        path->points[i].x = (int16_t)lroundf(path->points[i].x * scale);
-        path->points[i].y = (int16_t)lroundf(path->points[i].y * scale);
-    }
-    path->points[MOTION_PATH_STEPS] = (MotionPoint)
-    {
-        0, 0
+        cosf(error_angle) * error_radius,
+        sinf(error_angle) * error_radius
     };
+    const float correction = (motion_random(&seed) - 0.5f) * 6.0f;
+    for (uint16_t i = 0U; i <= MOTION_PATH_STEPS; i++)
+    {
+        const float position = (float)i * PATH_SEGMENTS / MOTION_PATH_STEPS;
+        uint16_t segment = (uint16_t)position;
+        if (segment >= PATH_SEGMENTS)
+        {
+            segment = PATH_SEGMENTS - 1U;
+        }
+        const float t = position - segment;
+        const PathAnchor a = anchors[segment > 0U ? segment - 1U : 0U];
+        const PathAnchor b = anchors[segment];
+        const PathAnchor c = anchors[segment + 1U];
+        const PathAnchor d = anchors[segment + 2U <= PATH_SEGMENTS ? segment + 2U : PATH_SEGMENTS];
+        float x = motion_interpolate(a.x, b.x, c.x, d.x, t);
+        float y = motion_interpolate(a.y, b.y, c.y, d.y, t);
+        if (segment == PATH_SEGMENTS - 1U)
+        {
+            const float adjustment = correction * 16.0f * t * t * (1.0f - t) * (1.0f - t);
+            x += adjustment;
+            y -= adjustment;
+        }
+        const float distance = hypotf(x, y);
+        if (distance > radius - 1.0f)
+        {
+            const float scale = (radius - 1.0f) / distance;
+            x *= scale;
+            y *= scale;
+        }
+        path->points[i] = (MotionPoint)
+        {
+            (int16_t)lroundf(x), (int16_t)lroundf(y)
+        };
+    }
 }

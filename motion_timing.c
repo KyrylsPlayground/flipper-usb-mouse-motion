@@ -22,3 +22,51 @@ MotionTiming motion_timing_plan(
                               : 2U;
     return timing;
 }
+
+static uint32_t motion_timing_random(uint32_t* seed)
+{
+    *seed ^= *seed << 13;
+    *seed ^= *seed >> 17;
+    *seed ^= *seed << 5;
+    return *seed;
+}
+
+void motion_timing_offsets(
+    uint32_t* offsets, uint16_t reports, uint32_t duration_ticks,
+    uint32_t min_step_ticks, uint32_t pause_limit_ticks, uint32_t seed)
+{
+    if (seed == 0U)
+    {
+        seed = 1U;
+    }
+    uint16_t weights[MOTION_PATH_STEPS];
+    const uint16_t intervals = reports - 1U;
+    uint32_t total_weight = 0U;
+    const uint16_t pause_index = 1U + motion_timing_random(&seed) % (intervals - 2U);
+    const uint16_t speed_a = 4U + motion_timing_random(&seed) % 16U;
+    const uint16_t speed_b = 4U + motion_timing_random(&seed) % 16U;
+    for (uint16_t i = 0U; i < intervals; i++)
+    {
+        const uint16_t edge = i < intervals / 2U ? i : intervals - i - 1U;
+        const uint16_t slowdown = edge < 12U ? (12U - edge) * 2U : 0U;
+        weights[i] = (speed_a * (intervals - i) + speed_b * i) / intervals +
+                     slowdown + motion_timing_random(&seed) % 3U;
+        total_weight += weights[i];
+    }
+    const uint32_t extra = duration_ticks - intervals * min_step_ticks;
+    uint32_t pause = extra / 8U;
+    if (pause > pause_limit_ticks)
+    {
+        pause = pause_limit_ticks;
+    }
+    const uint32_t distributed = extra - pause;
+    uint32_t weight_so_far = 0U;
+    offsets[0] = 0U;
+    for (uint16_t i = 0U; i < intervals; i++)
+    {
+        weight_so_far += weights[i];
+        offsets[i + 1U] = (i + 1U) * min_step_ticks +
+                          distributed * weight_so_far / total_weight +
+                          (i >= pause_index ? pause : 0U);
+    }
+}

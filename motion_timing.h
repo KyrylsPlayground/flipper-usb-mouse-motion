@@ -15,3 +15,7 @@ MotionTiming motion_timing_plan(
     uint32_t min_step_ticks,
     uint32_t start_random,
     uint32_t duration_random);
+
+void motion_timing_offsets(
+    uint32_t* offsets, uint16_t reports, uint32_t duration_ticks,
+    uint32_t min_step_ticks, uint32_t pause_limit_ticks, uint32_t seed);

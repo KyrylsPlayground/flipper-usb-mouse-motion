@@ -10,13 +10,13 @@
 #define RADIUS_STEP 25U
 #define INTERVAL_MIN 1U
 #define INTERVAL_MAX 30U
-#define CLICK_HOLD_MS 40U
 
 typedef enum
 {
     MotionPhaseWait,
     MotionPhaseMove,
     MotionPhaseRelease,
+    MotionPhaseClick,
     MotionPhaseRest,
 } MotionPhase;
 
@@ -37,6 +37,12 @@ typedef struct
     uint32_t window_end;
     uint32_t motion_start;
     uint32_t motion_duration;
+    uint32_t motion_offsets[MOTION_PATH_STEPS];
+    uint8_t click_count;
+    uint8_t click_index;
+    uint8_t burst_button;
+    uint32_t click_hold_ticks[3];
+    uint32_t click_gap_ticks[2];
     uint16_t point_stride;
     FuriHalUsbHidConfig usb_config;
 } MouseMotion;
@@ -62,7 +68,7 @@ static void mouse_motion_draw(Canvas* canvas, void* context)
     canvas_draw_str(canvas, 0, 32, text);
     snprintf(text, sizeof(text), "Up/Down Interval: %us", app->interval);
     canvas_draw_str(canvas, 0, 42, text);
-    snprintf(text, sizeof(text), "OK Click: %s", app->button == HID_MOUSE_BTN_LEFT ? "Left" : "Right");
+    snprintf(text, sizeof(text), "OK: %s (1-3 clicks)", app->button == HID_MOUSE_BTN_LEFT ? "Left" : "Right");
     canvas_draw_str(canvas, 0, 52, text);
     canvas_draw_str(canvas, 0, 63, "Hold OK:run/pause Back:exit");
     furi_mutex_release(app->mutex);
@@ -94,9 +100,22 @@ static void mouse_motion_begin_window(MouseMotion* app)
     motion_path_generate(&app->path, app->radius, furi_hal_random_get());
     const uint32_t interval_ms = app->interval * 1000U;
     const uint32_t window_ticks = furi_ms_to_ticks(interval_ms);
+    app->click_count = 1U + furi_hal_random_get() % 3U;
+    app->click_index = 0U;
+    uint32_t click_ticks = furi_ms_to_ticks(40U);
+    for (uint8_t i = 0U; i < app->click_count; i++)
+    {
+        app->click_hold_ticks[i] = furi_ms_to_ticks(25U + furi_hal_random_get() % 36U);
+        click_ticks += app->click_hold_ticks[i];
+        if (i + 1U < app->click_count)
+        {
+            app->click_gap_ticks[i] = furi_ms_to_ticks(50U + furi_hal_random_get() % 41U);
+            click_ticks += app->click_gap_ticks[i];
+        }
+    }
     const MotionTiming timing = motion_timing_plan(
         window_ticks,
-        furi_ms_to_ticks(CLICK_HOLD_MS + 40U),
+        click_ticks,
         furi_ms_to_ticks(2U),
         furi_hal_random_get(),
         furi_hal_random_get());
@@ -105,9 +124,25 @@ static void mouse_motion_begin_window(MouseMotion* app)
     app->motion_start = now + timing.offset_ticks;
     app->motion_duration = timing.duration_ticks;
     app->point_stride = timing.point_stride;
+    motion_timing_offsets(
+        app->motion_offsets, MOTION_PATH_STEPS / app->point_stride,
+        app->motion_duration, furi_ms_to_ticks(2U), furi_ms_to_ticks(120U),
+        furi_hal_random_get());
     app->deadline = app->motion_start;
     app->phase = MotionPhaseWait;
     app->step = 0U;
+}
+
+static void mouse_motion_press(MouseMotion* app)
+{
+    app->pressed_button = app->burst_button;
+    if (!furi_hal_hid_mouse_press(app->pressed_button))
+    {
+        mouse_motion_stop(app);
+        return;
+    }
+    app->phase = MotionPhaseRelease;
+    app->deadline = furi_get_tick() + app->click_hold_ticks[app->click_index];
 }
 
 static void mouse_motion_tick(MouseMotion* app)
@@ -122,6 +157,11 @@ static void mouse_motion_tick(MouseMotion* app)
         mouse_motion_begin_window(app);
         return;
     }
+    if (app->phase == MotionPhaseClick)
+    {
+        mouse_motion_press(app);
+        return;
+    }
     if (app->phase == MotionPhaseRelease)
     {
         if (!furi_hal_hid_mouse_release(app->pressed_button))
@@ -130,8 +170,17 @@ static void mouse_motion_tick(MouseMotion* app)
             return;
         }
         app->pressed_button = 0U;
-        app->phase = MotionPhaseRest;
-        app->deadline = app->window_end;
+        app->click_index++;
+        if (app->click_index < app->click_count)
+        {
+            app->phase = MotionPhaseClick;
+            app->deadline = furi_get_tick() + app->click_gap_ticks[app->click_index - 1U];
+        }
+        else
+        {
+            app->phase = MotionPhaseRest;
+            app->deadline = app->window_end;
+        }
         return;
     }
 
@@ -148,21 +197,14 @@ static void mouse_motion_tick(MouseMotion* app)
     app->step += app->point_stride;
     if (app->step == MOTION_PATH_STEPS)
     {
-        app->pressed_button = app->button;
-        if (!furi_hal_hid_mouse_press(app->pressed_button))
-        {
-            mouse_motion_stop(app);
-            return;
-        }
-        app->phase = MotionPhaseRelease;
-        app->deadline = furi_get_tick() + furi_ms_to_ticks(CLICK_HOLD_MS);
+        app->burst_button = app->button;
+        mouse_motion_press(app);
     }
     else
     {
         const uint32_t reports_sent = app->step / app->point_stride;
-        const uint32_t report_count = MOTION_PATH_STEPS / app->point_stride;
         app->deadline = app->motion_start +
-                        app->motion_duration * reports_sent / (report_count - 1U);
+                        app->motion_offsets[reports_sent];
     }
 }
 
