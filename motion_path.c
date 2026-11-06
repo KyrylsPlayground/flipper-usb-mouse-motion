@@ -1,5 +1,6 @@
 #include "motion_path.h"
 #include <math.h>
+#include <stdbool.h>
 
 #define MOTION_TAU 6.28318530718f
 #define PATH_SEGMENTS 6U
@@ -167,51 +168,123 @@ void motion_path_generate_test(MotionPath* path, MotionArea area, MotionPoint st
     };
 }
 
-void motion_path_generate_loop(MotionPath* path, MotionArea area, MotionPoint start, MotionTrajectory trajectory)
+static float motion_circle_radius(MotionArea area, MotionPoint start, float nx, float ny)
 {
-    float edge_x = area.width / 2.0f;
+    const MotionRelativeBounds bounds = motion_path_relative_bounds(area, start);
+    float radius = (area.width < area.height ? area.width : area.height) / 2.0f;
+    if (1.0f - nx > 0.000001f)
+    {
+        radius = fminf(radius, -bounds.min_x / (1.0f - nx));
+    }
+    if (1.0f + nx > 0.000001f)
+    {
+        radius = fminf(radius, bounds.max_x / (1.0f + nx));
+    }
+    if (1.0f - ny > 0.000001f)
+    {
+        radius = fminf(radius, -bounds.min_y / (1.0f - ny));
+    }
+    if (1.0f + ny > 0.000001f)
+    {
+        radius = fminf(radius, bounds.max_y / (1.0f + ny));
+    }
+    return fmaxf(0.0f, radius);
+}
+
+static void motion_path_generate_circle(MotionPath* path, MotionArea area, MotionPoint start, uint32_t seed)
+{
+    const float orientation = motion_random(&seed) * MOTION_TAU;
+    float nx = cosf(orientation);
+    float ny = sinf(orientation);
+    const MotionRelativeBounds bounds = motion_path_relative_bounds(area, start);
+    // A start on an edge permits only the inward normal as the center direction.
+    if (bounds.min_x == 0 || bounds.max_x == 0)
+    {
+        nx = bounds.min_x == 0 ? 1.0f : -1.0f;
+        ny = 0.0f;
+    }
+    if (bounds.min_y == 0 || bounds.max_y == 0)
+    {
+        nx = 0.0f;
+        ny = bounds.min_y == 0 ? 1.0f : -1.0f;
+    }
+    const float radius = motion_circle_radius(area, start, nx, ny);
+    const float center_x = start.x + radius * nx;
+    const float center_y = start.y + radius * ny;
+    const float direction = motion_random(&seed) < 0.5f ? -1.0f : 1.0f;
+    for (uint16_t i = 0U; i <= MOTION_PATH_STEPS; i++)
+    {
+        const float angle = direction * MOTION_TAU * i / MOTION_PATH_STEPS;
+        const float x = center_x - radius * (nx * cosf(angle) - ny * sinf(angle));
+        const float y = center_y - radius * (nx * sinf(angle) + ny * cosf(angle));
+        path->points[i] = motion_path_clamp(area, (MotionPoint)
+        {
+            (int16_t)lroundf(x), (int16_t)lroundf(y)
+        });
+    }
+}
+
+static void motion_path_generate_rectangle(MotionPath* path, MotionArea area, MotionPoint start, uint32_t seed)
+{
+    const MotionRelativeBounds bounds = motion_path_relative_bounds(area, (MotionPoint)
+    {
+        0, 0
+    });
+    MotionPoint corners[4];
+    uint8_t count = 0U;
+    for (uint8_t i = 0U; i < 4U; i++)
+    {
+        const MotionPoint corner =
+        {
+            (int16_t)((i & 1U) ? bounds.max_x : bounds.min_x),
+            (int16_t)((i & 2U) ? bounds.max_y : bounds.min_y),
+        };
+        if (corner.x != start.x && corner.y != start.y)
+        {
+            corners[count++] = corner;
+        }
+    }
+    const MotionPoint opposite = corners[seed % count];
+    const bool horizontal_first = (seed & 4U) != 0U;
+    const MotionPoint vertices[] =
+    {
+        start,
+        {
+            horizontal_first ? opposite.x : start.x, horizontal_first ? start.y : opposite.y
+        },
+        opposite,
+        {
+            horizontal_first ? start.x : opposite.x, horizontal_first ? opposite.y : start.y
+        },
+        start,
+    };
+    for (uint16_t i = 0U; i < MOTION_PATH_STEPS; i++)
+    {
+        const uint16_t side = i / 32U;
+        const float t = (float)(i % 32U) / 32.0f;
+        const MotionPoint from = vertices[side];
+        const MotionPoint to = vertices[side + 1U];
+        path->points[i] = (MotionPoint)
+        {
+            (int16_t)lroundf(from.x + (to.x - from.x) * t),
+            (int16_t)lroundf(from.y + (to.y - from.y) * t),
+        };
+    }
+}
+
+void motion_path_generate_loop(MotionPath* path, MotionArea area, MotionPoint start, MotionTrajectory trajectory, uint32_t seed)
+{
+    if (seed == 0U)
+    {
+        seed = 1U;
+    }
     if (trajectory == MotionTrajectoryCircle)
     {
-        edge_x = (area.width < area.height ? area.width : area.height) / 2U;
-        for (uint16_t i = 0U; i <= MOTION_PATH_STEPS; i++)
-        {
-            float x;
-            float y;
-            if (i <= 16U)
-            {
-                const float t = (float)i / 16.0f;
-                x = start.x + (edge_x - start.x) * t;
-                y = start.y * (1.0f - t);
-            }
-            else if (i <= 112U)
-            {
-                const float angle = (float)(i - 16U) * MOTION_TAU / 96.0f;
-                x = cosf(angle) * edge_x;
-                y = sinf(angle) * edge_x;
-            }
-            else
-            {
-                x = edge_x;
-                y = 0.0f;
-            }
-            path->points[i] = motion_path_clamp(area, (MotionPoint)
-            {
-                (int16_t)lroundf(x), (int16_t)lroundf(y)
-            });
-        }
+        motion_path_generate_circle(path, area, start, seed);
     }
     else
     {
-        motion_path_generate_test(path, area, start);
-    }
-    for (uint16_t i = 113U; i <= MOTION_PATH_STEPS; i++)
-    {
-        const float t = (float)(i - 112U) / 16.0f;
-        path->points[i] = motion_path_clamp(area, (MotionPoint)
-        {
-            (int16_t)lroundf(edge_x + (start.x - edge_x) * t),
-            (int16_t)lroundf(start.y * t)
-        });
+        motion_path_generate_rectangle(path, area, start, seed);
     }
     path->points[0] = start;
     path->points[MOTION_PATH_STEPS] = start;

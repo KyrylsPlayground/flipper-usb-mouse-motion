@@ -326,7 +326,7 @@ static void mouse_motion_begin_window(MouseMotion* app)
     }
     else
     {
-        motion_path_generate_loop(&app->path, app->movement_area, app->position, app->settings.trajectory);
+        motion_path_generate_loop(&app->path, app->movement_area, app->position, app->settings.trajectory, furi_hal_random_get());
     }
     const uint32_t interval_ms = app->settings.interval * 1000U;
     const uint32_t window_ticks = furi_ms_to_ticks(interval_ms);

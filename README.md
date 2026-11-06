@@ -2,7 +2,7 @@
 
 A Flipper Zero USB HID application with smooth mouse movement along random, circular or rectangular paths, configurable click bursts, and a rectangular boundary test.
 
-Current version: **1.9.0**. Settings are restored from the SD card. Starts paused.
+Current version: **1.9.1**. Settings are restored from the SD card. Starts paused.
 
 ## Features
 
@@ -50,7 +50,12 @@ X/Y are the **full width and height**, not radii. For example, X=400 and Y=200 g
 
 Odd dimensions use integer bounds that retain the exact selected size: X=501 gives -250..+251. The extra HID count is on the positive side.
 
-Random paths vary their endpoint within fixed bounds. Circle and Rectangle return exactly to the cycle starting offset without random endpoint displacement. Circle uses the largest centered circle that fits the smaller X/Y dimension; Rectangle follows the area perimeter. Both include entry and return segments. The double-OK area test always checks the rectangular bounds.
+Random paths vary their endpoint within fixed bounds. Circle and Rectangle return exactly to the cycle starting offset without random endpoint displacement, with no entry/exit segments.
+
+- **Circle** starts on its circumference at the current pointer offset. Center orientation and traversal direction are randomized. The requested diameter is the smaller X/Y dimension; the radius is reduced only as needed to keep the whole circle inside the fixed area. At an exact area corner no nonzero circle can fit through that point, so the path degenerates without crossing the bounds.
+- **Rectangle** starts at one corner, with the diagonally opposite corner randomly selected from the area's corners. Degenerate corner choices are excluded. Horizontal-first/vertical-first traversal is randomized.
+
+The double-OK area test still checks the full rectangular bounds from the center, independently of the work-path selection.
 
 Movement settings and click counts apply to the next cycle. The selected button applies to the next burst and stays unchanged throughout that burst. A running test keeps the settings captured at its start.
 
@@ -180,6 +185,7 @@ The version commits were created retrospectively by replaying recorded edits fro
 | 1.7.0 | Four work-speed modes, no catch-up bursts, uniform corrective speed, and visible tracked offsets |
 | 1.8.0 | Save and restore settings on the SD card; paused autosave and exit flush |
 | 1.9.0 | Fine-grained HID streaming, throttled display updates, and saved Random/Circle/Rectangle path selection |
+| 1.9.1 | Start-on-circumference oriented circles and start-corner rectangles without entry/exit segments |
 
 ## License
 
