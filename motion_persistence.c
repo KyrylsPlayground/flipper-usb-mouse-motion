@@ -7,7 +7,7 @@
 #define MOTION_SETTINGS_PATH APP_DATA_PATH(".settings")
 #define MOTION_SETTINGS_TEMP_PATH APP_DATA_PATH(".settings.tmp")
 #define MOTION_SETTINGS_TYPE "USB Mouse Motion Settings"
-#define MOTION_SETTINGS_VERSION 1U
+#define MOTION_SETTINGS_VERSION 2U
 
 typedef enum
 {
@@ -20,13 +20,14 @@ typedef enum
     MotionFieldMaxClicks,
     MotionFieldWorkMode,
     MotionFieldTestMode,
+    MotionFieldTrajectory,
     MotionFieldCount,
 } MotionSettingsField;
 
 static const char* const motion_settings_keys[MotionFieldCount] =
 {
     "width", "height", "interval_s", "min_speed", "max_speed",
-    "min_clicks", "max_clicks", "work_mode", "test_mode",
+    "min_clicks", "max_clicks", "work_mode", "test_mode", "trajectory",
 };
 
 static bool motion_settings_fields_valid(const uint32_t* values)
@@ -38,7 +39,8 @@ static bool motion_settings_fields_valid(const uint32_t* values)
            values[MotionFieldMinSpeed] <= values[MotionFieldMaxSpeed] &&
            values[MotionFieldMinClicks] <= values[MotionFieldMaxClicks] &&
            values[MotionFieldMaxClicks] <= MOTION_CLICK_LIMIT &&
-           values[MotionFieldWorkMode] < MotionWorkCount && values[MotionFieldTestMode] < MotionTestCount;
+           values[MotionFieldWorkMode] < MotionWorkCount && values[MotionFieldTestMode] < MotionTestCount &&
+           values[MotionFieldTrajectory] < MotionTrajectoryCount;
 }
 
 static bool motion_settings_load_file(MotionSettings* settings, const char* path)
@@ -55,8 +57,9 @@ static bool motion_settings_load_file(MotionSettings* settings, const char* path
     bool loaded = flipper_format_file_open_existing(file, path) &&
                   flipper_format_read_header(file, type, &version) &&
                   strcmp(furi_string_get_cstr(type), MOTION_SETTINGS_TYPE) == 0 &&
-                  version == MOTION_SETTINGS_VERSION;
-    for (uint8_t i = 0U; loaded && i < MotionFieldCount; i++)
+                  (version == 1U || version == MOTION_SETTINGS_VERSION);
+    const uint8_t field_count = version == 1U ? MotionFieldTrajectory : MotionFieldCount;
+    for (uint8_t i = 0U; loaded && i < field_count; i++)
     {
         loaded = flipper_format_read_uint32(file, motion_settings_keys[i], &values[i], 1U);
     }
@@ -82,6 +85,7 @@ static bool motion_settings_load_file(MotionSettings* settings, const char* path
     restored.max_clicks = values[MotionFieldMaxClicks];
     restored.work_mode = values[MotionFieldWorkMode];
     restored.test_mode = values[MotionFieldTestMode];
+    restored.trajectory = values[MotionFieldTrajectory];
     restored.right_button = right_button;
     *settings = restored;
     return true;
@@ -98,7 +102,7 @@ bool motion_settings_save(const MotionSettings* settings)
     {
         settings->area.width, settings->area.height, settings->interval,
         settings->min_speed, settings->max_speed, settings->min_clicks,
-        settings->max_clicks, settings->work_mode, settings->test_mode,
+        settings->max_clicks, settings->work_mode, settings->test_mode, settings->trajectory,
     };
     if (!motion_settings_fields_valid(values))
     {

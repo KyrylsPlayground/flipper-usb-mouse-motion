@@ -21,6 +21,14 @@ typedef struct
     uint16_t height;
 } MotionArea;
 
+typedef enum
+{
+    MotionTrajectoryRandom,
+    MotionTrajectoryCircle,
+    MotionTrajectoryRectangle,
+    MotionTrajectoryCount,
+} MotionTrajectory;
+
 typedef struct
 {
     int32_t min_x;
@@ -35,3 +43,4 @@ MotionPoint motion_path_clamp(MotionArea area, MotionPoint point);
 MotionPoint motion_path_advance(MotionArea area, MotionPoint position, MotionPoint target);
 void motion_path_generate(MotionPath* path, MotionArea area, MotionPoint start, uint32_t seed);
 void motion_path_generate_test(MotionPath* path, MotionArea area, MotionPoint start);
+void motion_path_generate_loop(MotionPath* path, MotionArea area, MotionPoint start, MotionTrajectory trajectory);

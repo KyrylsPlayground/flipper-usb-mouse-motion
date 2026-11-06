@@ -9,6 +9,7 @@ typedef enum
 {
     MotionItemWidth,
     MotionItemHeight,
+    MotionItemTrajectory,
     MotionItemInterval,
     MotionItemMinSpeed,
     MotionItemMaxSpeed,
@@ -40,6 +41,7 @@ typedef enum
 typedef struct
 {
     MotionArea area;
+    MotionTrajectory trajectory;
     uint16_t min_speed;
     uint16_t max_speed;
     uint8_t interval;

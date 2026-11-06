@@ -8,10 +8,13 @@
 #include "motion_tap.h"
 #include "motion_settings.h"
 #include "motion_persistence.h"
+#include "motion_stream.h"
 
 #define DOUBLE_TAP_MS 350U
 #define SETTINGS_SAVE_DELAY_MS 500U
 #define SETTINGS_SAVE_RETRY_MS 2000U
+#define MOTION_FRAME_MS 4U
+#define UI_REFRESH_MS 100U
 
 typedef enum
 {
@@ -36,9 +39,12 @@ typedef struct
     FuriMutex* mutex;
     ViewPort* viewport;
     MotionPath path;
+    MotionStream stream;
+    MotionPoint frame_position;
+    uint16_t movement_pause_index;
+    uint32_t movement_pause_ticks;
     MotionPoint position;
     MotionArea movement_area;
-    uint16_t movement_speed_limit;
     uint16_t movement_constant_speed;
     MotionSettings settings;
     bool settings_dirty;
@@ -54,7 +60,6 @@ typedef struct
     uint16_t step;
     uint32_t deadline;
     uint32_t window_end;
-    uint32_t motion_start;
     uint32_t motion_duration;
     uint32_t motion_offsets[MOTION_PATH_STEPS];
     uint8_t click_count;
@@ -65,6 +70,8 @@ typedef struct
     uint16_t point_stride;
     FuriHalUsbHidConfig usb_config;
 } MouseMotion;
+
+static void mouse_motion_request_center(MouseMotion* app, MotionCenterAction action);
 
 static void mouse_motion_draw(Canvas* canvas, void* context)
 {
@@ -106,6 +113,20 @@ static void mouse_motion_draw(Canvas* canvas, void* context)
             case MotionItemHeight:
                 snprintf(text, sizeof(text), "Y height: %u", app->settings.area.height);
                 break;
+            case MotionItemTrajectory:
+            {
+                const char* label = "Random";
+                if (app->settings.trajectory == MotionTrajectoryCircle)
+                {
+                    label = "Circle";
+                }
+                if (app->settings.trajectory == MotionTrajectoryRectangle)
+                {
+                    label = "Rectangle";
+                }
+                snprintf(text, sizeof(text), "Path: %s", label);
+                break;
+            }
             case MotionItemInterval:
                 snprintf(text, sizeof(text), "Interval: %us", app->settings.interval);
                 break;
@@ -185,11 +206,51 @@ static void mouse_motion_stop(MouseMotion* app)
     app->running = false;
     app->testing = false;
     app->after_center = MotionCenterPause;
+    app->stream.frame = 0U;
+    app->stream.frames = 0U;
     if (app->pressed_button != 0U)
     {
         furi_hal_hid_mouse_release(app->pressed_button);
         app->pressed_button = 0U;
     }
+}
+
+static void mouse_motion_schedule_frame(MouseMotion* app, uint32_t extra_delay)
+{
+    uint32_t delay;
+    if (!motion_stream_next(&app->stream, &app->frame_position, &delay))
+    {
+        mouse_motion_stop(app);
+        return;
+    }
+    app->deadline = furi_get_tick() + extra_delay + delay;
+}
+
+static bool mouse_motion_send_frame(MouseMotion* app)
+{
+    const int16_t dx = app->frame_position.x - app->position.x;
+    const int16_t dy = app->frame_position.y - app->position.y;
+    if (dx < -127 || dx > 127 || dy < -127 || dy > 127 || ((dx != 0 || dy != 0) && !furi_hal_hid_mouse_move((int8_t)dx, (int8_t)dy)))
+    {
+        mouse_motion_stop(app);
+        return false;
+    }
+    app->position = app->frame_position;
+    return true;
+}
+
+static void mouse_motion_prepare_segment(MouseMotion* app, uint32_t initial_delay)
+{
+    const uint16_t report = app->step / app->point_stride;
+    uint32_t duration = app->motion_offsets[report] - (report != 0U ? app->motion_offsets[report - 1U] : 0U);
+    if (app->movement_pause_ticks != 0U && report == app->movement_pause_index)
+    {
+        duration -= app->movement_pause_ticks;
+        initial_delay += app->movement_pause_ticks;
+    }
+    const MotionPoint target = motion_path_clamp(app->movement_area, app->path.points[app->step + app->point_stride]);
+    motion_stream_begin(&app->stream, app->position, target, duration, furi_ms_to_ticks(MOTION_FRAME_MS), furi_ms_to_ticks(2U));
+    mouse_motion_schedule_frame(app, initial_delay);
 }
 
 static void mouse_motion_start_test(MouseMotion* app)
@@ -206,7 +267,6 @@ static void mouse_motion_start_test(MouseMotion* app)
     app->phase = MotionPhaseMove;
     app->step = 0U;
     app->point_stride = 1U;
-    app->motion_start = furi_get_tick();
     uint16_t speed = 0U;
     if (app->settings.test_mode == MotionTestMinimum)
     {
@@ -216,14 +276,14 @@ static void mouse_motion_start_test(MouseMotion* app)
     {
         speed = app->settings.max_speed;
     }
-    app->movement_speed_limit = speed != 0U ? speed : app->settings.max_speed;
     app->movement_constant_speed = speed;
+    app->movement_pause_ticks = 0U;
     app->motion_duration = furi_ms_to_ticks(motion_timing_test_offsets(&app->path, app->motion_offsets, speed));
     for (uint16_t i = 0U; i < MOTION_PATH_STEPS; i++)
     {
         app->motion_offsets[i] = furi_ms_to_ticks(app->motion_offsets[i]);
     }
-    app->deadline = app->motion_start + app->motion_offsets[0];
+    mouse_motion_prepare_segment(app, 0U);
 }
 
 static uint32_t mouse_motion_remaining(uint32_t deadline, uint32_t now)
@@ -252,9 +312,22 @@ static void mouse_motion_save_settings(MouseMotion* app)
 static void mouse_motion_begin_window(MouseMotion* app)
 {
     app->movement_area = app->settings.area;
+    const MotionPoint bounded = motion_path_clamp(app->movement_area, app->position);
+    if (bounded.x != app->position.x || bounded.y != app->position.y)
+    {
+        mouse_motion_request_center(app, MotionCenterRun);
+        return;
+    }
+    app->movement_pause_ticks = 0U;
     app->movement_constant_speed = motion_settings_work_speed(&app->settings, furi_hal_random_get());
-    app->movement_speed_limit = app->movement_constant_speed != 0U ? app->movement_constant_speed : app->settings.max_speed;
-    motion_path_generate(&app->path, app->movement_area, app->position, furi_hal_random_get());
+    if (app->settings.trajectory == MotionTrajectoryRandom)
+    {
+        motion_path_generate(&app->path, app->movement_area, app->position, furi_hal_random_get());
+    }
+    else
+    {
+        motion_path_generate_loop(&app->path, app->movement_area, app->position, app->settings.trajectory);
+    }
     const uint32_t interval_ms = app->settings.interval * 1000U;
     const uint32_t window_ticks = furi_ms_to_ticks(interval_ms);
     app->click_count = app->settings.min_clicks + furi_hal_random_get() %
@@ -295,6 +368,8 @@ static void mouse_motion_begin_window(MouseMotion* app)
             &app->path, app->point_stride, target_ms, app->motion_offsets, furi_hal_random_get(),
             app->settings.min_speed, app->settings.max_speed);
         duration_ms = speed.duration_ms;
+        app->movement_pause_index = speed.pause_index;
+        app->movement_pause_ticks = furi_ms_to_ticks(speed.pause_ms);
     }
     const uint16_t reports = MOTION_PATH_STEPS / app->point_stride;
     for (uint16_t i = 0U; i < reports; i++)
@@ -310,10 +385,9 @@ static void mouse_motion_begin_window(MouseMotion* app)
                                 : furi_hal_random_get() % (latest_start + 1U);
     const uint32_t now = furi_get_tick();
     app->window_end = now + cycle_ticks;
-    app->motion_start = now + offset;
-    app->deadline = app->motion_start + app->motion_offsets[0];
     app->phase = MotionPhaseWait;
     app->step = 0U;
+    mouse_motion_prepare_segment(app, offset);
 }
 
 static uint32_t mouse_motion_travel_ticks(MotionPoint from, MotionPoint to, uint16_t speed)
@@ -364,28 +438,27 @@ static void mouse_motion_request_center(MouseMotion* app, MotionCenterAction act
     {
         app->center_speed = app->settings.test_mode == MotionTestMaximum ? app->settings.max_speed : app->settings.min_speed;
     }
-    const MotionPoint next = motion_path_return_step(app->position);
-    app->deadline = furi_get_tick() + mouse_motion_travel_ticks(app->position, next, app->center_speed);
+    const MotionPoint center =
+    {
+        0, 0
+    };
+    const uint32_t duration = mouse_motion_travel_ticks(app->position, center, app->center_speed);
+    motion_stream_begin(&app->stream, app->position, center, duration, furi_ms_to_ticks(MOTION_FRAME_MS), furi_ms_to_ticks(2U));
+    mouse_motion_schedule_frame(app, 0U);
 }
 
 static void mouse_motion_center_tick(MouseMotion* app)
 {
-    const MotionPoint next = motion_path_return_step(app->position);
-    const int8_t dx = next.x - app->position.x;
-    const int8_t dy = next.y - app->position.y;
-    if (!furi_hal_hid_mouse_move(dx, dy))
+    if (!mouse_motion_send_frame(app))
     {
-        mouse_motion_stop(app);
         return;
     }
-    app->position = next;
-    if (next.x == 0 && next.y == 0)
+    if (app->stream.frame == app->stream.frames)
     {
         mouse_motion_finish_center(app);
         return;
     }
-    const MotionPoint following = motion_path_return_step(next);
-    app->deadline = furi_get_tick() + mouse_motion_travel_ticks(next, following, app->center_speed);
+    mouse_motion_schedule_frame(app, 0U);
 }
 
 static void mouse_motion_begin_test(MouseMotion* app)
@@ -450,20 +523,13 @@ static void mouse_motion_tick(MouseMotion* app)
     }
 
     app->phase = MotionPhaseMove;
-    const MotionPoint target = motion_path_clamp(app->movement_area, app->path.points[app->step + app->point_stride]);
-    const MotionPoint next = motion_path_advance(app->movement_area, app->position, target);
-    const int16_t dx = next.x - app->position.x;
-    const int16_t dy = next.y - app->position.y;
-    if (!furi_hal_hid_mouse_move((int8_t)dx, (int8_t)dy))
+    if (!mouse_motion_send_frame(app))
     {
-        mouse_motion_stop(app);
         return;
     }
-    app->position = next;
-    if (next.x != target.x || next.y != target.y)
+    if (app->stream.frame < app->stream.frames)
     {
-        const MotionPoint following = motion_path_advance(app->movement_area, next, target);
-        app->deadline = furi_get_tick() + mouse_motion_travel_ticks(next, following, app->movement_speed_limit);
+        mouse_motion_schedule_frame(app, 0U);
         return;
     }
     app->step += app->point_stride;
@@ -486,9 +552,7 @@ static void mouse_motion_tick(MouseMotion* app)
     }
     else
     {
-        const uint32_t reports_sent = app->step / app->point_stride;
-        const uint32_t delay = app->motion_offsets[reports_sent] - app->motion_offsets[reports_sent - 1U];
-        app->deadline = furi_get_tick() + delay;
+        mouse_motion_prepare_segment(app, 0U);
     }
 }
 
@@ -573,10 +637,11 @@ int32_t usb_mouse_motion_app(void* context)
         view_port_input_callback_set(app->viewport, mouse_motion_input, app);
         gui_add_view_port(gui, app->viewport, GuiLayerFullscreen);
         bool keep_running = true;
+        uint32_t ui_deadline = furi_get_tick();
         while (keep_running)
         {
             InputEvent input;
-            uint32_t timeout = furi_ms_to_ticks(250U);
+            uint32_t timeout = mouse_motion_remaining(ui_deadline, furi_get_tick());
             if (app->settings_dirty && !app->running)
             {
                 const uint32_t remaining = mouse_motion_remaining(app->settings_save_deadline, furi_get_tick());
@@ -620,7 +685,11 @@ int32_t usb_mouse_motion_app(void* context)
             {
                 mouse_motion_save_settings(app);
             }
-            view_port_update(app->viewport);
+            if (status == FuriStatusOk || mouse_motion_remaining(ui_deadline, furi_get_tick()) == 0U)
+            {
+                view_port_update(app->viewport);
+                ui_deadline = furi_get_tick() + furi_ms_to_ticks(UI_REFRESH_MS);
+            }
         }
         furi_mutex_acquire(app->mutex, FuriWaitForever);
         mouse_motion_stop(app);

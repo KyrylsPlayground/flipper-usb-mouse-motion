@@ -1,13 +1,14 @@
 # USB Mouse Motion
 
-A Flipper Zero USB HID application with smooth randomized mouse movement, configurable click bursts, and a rectangular boundary test.
+A Flipper Zero USB HID application with smooth mouse movement along random, circular or rectangular paths, configurable click bursts, and a rectangular boundary test.
 
-Current version: **1.8.0**. Settings are restored from the SD card. Starts paused.
+Current version: **1.9.0**. Settings are restored from the SD card. Starts paused.
 
 ## Features
 
 - Independent X/Y dimensions around a fixed center, with tracked offsets to avoid cumulative endpoint drift.
-- Random spline paths, variable movement timing, short pauses, and small endpoint corrections.
+- Random spline paths with endpoint variation, or closed circle/rectangle paths.
+- Interpolated 2–4 ms HID microsteps with exact segment endpoints; display refresh limited to 10 Hz.
 - Random start time within each cycle and a configurable interval up to 99 seconds.
 - Adjustable minimum and maximum moving speeds.
 - Configurable left/right click bursts, including movement-only operation.
@@ -33,6 +34,7 @@ Holding OK is not required. Pause releases the pressed button, returns to the tr
 | --- | --- | --- |
 | X width | 50–1000 HID counts, step 1; hold-repeat 25 | 200 |
 | Y height | 50–1000 HID counts, step 1; hold-repeat 25 | 200 |
+| Path | Random / Circle / Rectangle | Random |
 | Interval | 1–99 seconds | 10 seconds |
 | Minimum speed | 50–2000 HID counts/second | 314 |
 | Maximum speed | 50–2000 HID counts/second | 700 |
@@ -48,18 +50,20 @@ X/Y are the **full width and height**, not radii. For example, X=400 and Y=200 g
 
 Odd dimensions use integer bounds that retain the exact selected size: X=501 gives -250..+251. The extra HID count is on the positive side.
 
+Random paths vary their endpoint within fixed bounds. Circle and Rectangle return exactly to the cycle starting offset without random endpoint displacement. Circle uses the largest centered circle that fits the smaller X/Y dimension; Rectangle follows the area perimeter. Both include entry and return segments. The double-OK area test always checks the rectangular bounds.
+
 Movement settings and click counts apply to the next cycle. The selected button applies to the next burst and stays unchanged throughout that burst. A running test keeps the settings captured at its start.
 
 ## Saved settings
 
-All ten configurable parameters are saved to `apps_data/usb_mouse_motion/.settings`
+All eleven configurable parameters are saved to `apps_data/usb_mouse_motion/.settings`
 on the Flipper SD card and restored on the next launch. A save is requested 500 ms
 after the last Left/Right edit while paused. Changes made during movement wait until
 the app pauses; exiting with Back also flushes pending changes. Storage writes never
 run during movement or centering. Failed saves show SAVE ERROR while paused and retry
 after 2 seconds.
 
-The file has a type/version header and validated numeric ranges. Missing or invalid
+The file has a type/version header and validated numeric ranges. Version 2 adds the path selection; existing version-1 files retain all previous settings and default to Random. Missing or invalid
 settings fall back to defaults. Writing uses a temporary `.settings.tmp`; a complete
 temporary file can be loaded if replacing the main file failed and left it unreadable.
 The selected menu row, running state, cursor offset and random trajectory are not
@@ -69,7 +73,9 @@ persisted. Each launch starts paused with a new origin at the current pointer po
 
 Natural mode initially chooses a movement-duration target from 25–95% of the available time after the random start, reserving the planned click burst and a 40 ms scheduling margin. Moving-speed limits take priority over that target. If movement and clicks cannot fit the selected interval, the cycle extends rather than exceeding its planned maximum speed. Long intervals leave idle time instead of forcing slower movement.
 
-Paths use 64 or 128 samples with a 2 ms minimum USB spacing. Run speed selects:
+Paths contain 64 or 128 geometric segments. Each segment is interpolated into HID microsteps with 2–4 ms planned spacing rather than sent as one large jump. Interpolation always uses the original segment endpoints, with integer rounding and an exact final point, so splitting adds no net HID displacement error. Reports with zero movement are skipped; very low speeds remain limited by integer HID counts.
+
+Run speed selects:
 
 - **Natural**: variable segment timing within the selected limits, including a 40–120 ms pause.
 - **Random**: one uniformly selected speed in the inclusive min/max range for the whole path.
@@ -99,7 +105,7 @@ Successful HID reports alone update that offset. Pause and test centering physic
 send the inverse relative displacement; the counter is never simply reset to zero.
 
 Every move is still clamped to the area captured at movement start. After resizing
-below the current offset, recovery moves only inward until back inside. Start after
+below the current offset, the next cycle first centers in small inward steps. Start after
 an interrupted return also centers before generating a new path. Disconnects and
 failed reports hard-stop without discarding the offset; the paused UI shows OFF CENTER
 if centering did not complete. Back exits immediately rather than delaying exit for
@@ -146,6 +152,7 @@ Configured identity: **VID 046D, PID C52B**, manufacturer `Logitech`, product `U
 - `motion_persistence.c/.h`: validated settings loading and SD-card saving.
 - `motion_path.c/.h`: random spline paths, bounds, and perimeter test paths.
 - `motion_timing.c/.h`: random scheduling and distance/speed-based timing.
+- `motion_stream.c/.h`: fine-grained interpolation with exact endpoint accounting.
 - `motion_tap.h`: single/double-tap recognition.
 - `application.fam`: Flipper application manifest.
 - `usb_mouse_motion.png`: 10×10 monochrome menu icon.
@@ -172,6 +179,7 @@ The version commits were created retrospectively by replaying recorded edits fro
 | 1.6.3 | Dimension step 1 / hold-repeat 25 and exact odd-sized rectangular bounds |
 | 1.7.0 | Four work-speed modes, no catch-up bursts, uniform corrective speed, and visible tracked offsets |
 | 1.8.0 | Save and restore settings on the SD card; paused autosave and exit flush |
+| 1.9.0 | Fine-grained HID streaming, throttled display updates, and saved Random/Circle/Rectangle path selection |
 
 ## License
 

@@ -30,6 +30,7 @@ void motion_settings_init(MotionSettings* settings)
         .right_button = true,
         .test_mode = MotionTestStandard,
         .work_mode = MotionWorkNatural,
+        .trajectory = MotionTrajectoryRandom,
     };
 }
 
@@ -74,6 +75,9 @@ void motion_settings_adjust(MotionSettings* settings, int direction, bool repeat
             break;
         case MotionItemInterval:
             settings->interval = motion_settings_change(settings->interval, direction, 1U, 99U);
+            break;
+        case MotionItemTrajectory:
+            settings->trajectory = (MotionTrajectory)((settings->trajectory + MotionTrajectoryCount + direction) % MotionTrajectoryCount);
             break;
         case MotionItemMinSpeed:
             settings->min_speed = motion_settings_change(
