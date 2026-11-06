@@ -10,6 +10,36 @@ typedef struct
     float y;
 } PathAnchor;
 
+MotionRelativeBounds motion_path_relative_bounds(MotionArea area, MotionPoint position)
+{
+    const int32_t half_x = area.width / 2U;
+    const int32_t half_y = area.height / 2U;
+    return (MotionRelativeBounds)
+    {
+        .min_x = -half_x - position.x,
+        .max_x = half_x - position.x,
+        .min_y = -half_y - position.y,
+        .max_y = half_y - position.y,
+    };
+}
+
+MotionPoint motion_path_return_step(MotionPoint position)
+{
+    const float distance = hypotf((float)position.x, (float)position.y);
+    if (distance <= 4.0f)
+    {
+        return (MotionPoint)
+        {
+            0, 0
+        };
+    }
+    const float scale = (distance - 4.0f) / distance;
+    return (MotionPoint)
+    {
+        (int16_t)lroundf(position.x * scale), (int16_t)lroundf(position.y * scale)
+    };
+}
+
 MotionPoint motion_path_clamp(MotionArea area, MotionPoint point)
 {
     const int16_t half_x = area.width / 2U;
@@ -152,14 +182,9 @@ void motion_path_generate(MotionPath* path, MotionArea area, MotionPoint start, 
     {
         0
     };
-    anchors[0] = (PathAnchor)
-    {
-        start.x, start.y
-    };
+    const MotionRelativeBounds bounds = motion_path_relative_bounds(area, start);
     const float half_x = area.width / 2.0f;
     const float half_y = area.height / 2.0f;
-    const float limit_x = half_x - 1.0f;
-    const float limit_y = half_y - 1.0f;
     float angle = motion_random(&seed) * MOTION_TAU;
     const float direction = motion_random(&seed) < 0.5f ? -1.0f : 1.0f;
     for (uint16_t i = 1U; i < PATH_SEGMENTS; i++)
@@ -172,10 +197,10 @@ void motion_path_generate(MotionPath* path, MotionArea area, MotionPoint start, 
         const float distance = edge * (0.25f + motion_random(&seed) * 0.55f);
         anchors[i] = (PathAnchor)
         {
-            dx * distance, dy * distance
+            dx * distance - start.x, dy * distance - start.y
         };
     }
-    // A small final correction ends near the origin instead of snapping exactly back.
+    // Endpoint error is relative to the current position; bounds stay anchored to the origin.
     const float error_angle = motion_random(&seed) * MOTION_TAU;
     const float error_radius = 1.0f + motion_random(&seed) * 4.0f;
     anchors[PATH_SEGMENTS] = (PathAnchor)
@@ -205,11 +230,11 @@ void motion_path_generate(MotionPath* path, MotionArea area, MotionPoint start, 
             x += adjustment;
             y -= adjustment;
         }
-        x = fmaxf(-limit_x, fminf(limit_x, x));
-        y = fmaxf(-limit_y, fminf(limit_y, y));
+        x = fmaxf(bounds.min_x + 1.0f, fminf(bounds.max_x - 1.0f, x));
+        y = fmaxf(bounds.min_y + 1.0f, fminf(bounds.max_y - 1.0f, y));
         path->points[i] = (MotionPoint)
         {
-            (int16_t)lroundf(x), (int16_t)lroundf(y)
+            (int16_t)(start.x + lroundf(x)), (int16_t)(start.y + lroundf(y))
         };
     }
     path->points[0] = start;

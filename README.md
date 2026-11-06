@@ -2,7 +2,7 @@
 
 A Flipper Zero USB HID application with smooth randomized mouse movement, configurable click bursts, and a rectangular boundary test.
 
-Current version: **1.6.1**. Starts paused. Settings reset when the app closes.
+Current version: **1.6.2**. Starts paused. Settings reset when the app closes.
 
 ## Features
 
@@ -25,7 +25,7 @@ Current version: **1.6.1**. Starts paused. Settings reset when the app closes.
 | Double OK | Run the boundary test, then return to pause |
 | Back | Exit and restore the previous USB configuration |
 
-Holding OK is not required. The test interrupts normal operation, sends no clicks, traces the rectangular perimeter, and returns to the tracked center.
+Holding OK is not required. Pause releases the pressed button, returns to the tracked center at the selected minimum speed, then becomes fully paused. The UI shows CENTERING during that return. The test interrupts normal operation, first returns to the same center, then traces the rectangular perimeter without clicks and finishes centered and paused. Its Standard 2-second duration excludes the preceding centering motion.
 
 ## Settings
 
@@ -53,7 +53,20 @@ The initial movement-duration target is randomly chosen from 25–95% of the ava
 
 Paths use 64 or 128 samples with a 2 ms minimum USB spacing and an explicit 40–120 ms pause. Small quantized steps cannot always represent the selected speed exactly. Speed-based tests use distance-derived delays without random pauses. Standard test mode schedules the complete perimeter-and-return path over approximately 2 seconds.
 
-The origin is fixed when the application opens. Successful HID reports update the tracked position, including partial paths interrupted by pause. Small endpoint errors are measured against that origin instead of accumulating between cycles. If the area is reduced below the current offset, one recovery path starts from the old position before subsequent paths fit the new area.
+The origin is fixed when the application opens and is not shifted between cycles.
+A random endpoint displacement is added to the current tracked offset, then clamped
+to the fixed area. Each next path uses bounds relative to its actual tracked start:
+`min_x = -X/2 - offset_x`, `max_x = X/2 - offset_x` (and likewise for Y).
+For X=500, offset +50 gives -300..+200; offset +25 gives -275..+225.
+Successful HID reports alone update that offset. Pause and test centering physically
+send the inverse relative displacement; the counter is never simply reset to zero.
+
+Every move is still clamped to the area captured at movement start. After resizing
+below the current offset, recovery moves only inward until back inside. Start after
+an interrupted return also centers before generating a new path. Disconnects and
+failed reports hard-stop without discarding the offset; the paused UI shows OFF CENTER
+if centering did not complete. Back exits immediately rather than delaying exit for
+centering.
 
 **HID counts are not screen pixels.** Host acceleration, screen edges, manual mouse movement, USB disconnects, and runtime scheduling can change the on-screen path or timing. This is not a validated model of human motion or a guarantee of undetectability.
 
@@ -117,6 +130,7 @@ The version commits were created retrospectively by replaying recorded edits fro
 | 1.5.3 | Minimum speed 314 |
 | 1.6.0 | Scrolling settings list, adjustable speeds/click counts, three test modes, single-OK start/pause |
 | 1.6.1 | Clamp every move to fixed bounds and calculate deltas from the latest tracked offset |
+| 1.6.2 | Offset-relative path bounds; return to center before pause, resume, and boundary tests |
 
 ## License
 

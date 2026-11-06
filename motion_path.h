@@ -21,6 +21,16 @@ typedef struct
     uint16_t height;
 } MotionArea;
 
+typedef struct
+{
+    int32_t min_x;
+    int32_t max_x;
+    int32_t min_y;
+    int32_t max_y;
+} MotionRelativeBounds;
+
+MotionRelativeBounds motion_path_relative_bounds(MotionArea area, MotionPoint position);
+MotionPoint motion_path_return_step(MotionPoint position);
 MotionPoint motion_path_clamp(MotionArea area, MotionPoint point);
 MotionPoint motion_path_advance(MotionArea area, MotionPoint position, MotionPoint target);
 void motion_path_generate(MotionPath* path, MotionArea area, MotionPoint start, uint32_t seed);

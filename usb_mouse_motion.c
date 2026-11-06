@@ -17,7 +17,15 @@ typedef enum
     MotionPhaseRelease,
     MotionPhaseClick,
     MotionPhaseRest,
+    MotionPhaseCenter,
 } MotionPhase;
+
+typedef enum
+{
+    MotionCenterPause,
+    MotionCenterRun,
+    MotionCenterTest,
+} MotionCenterAction;
 
 typedef struct
 {
@@ -34,6 +42,8 @@ typedef struct
     bool testing;
     MotionTap ok_tap;
     MotionPhase phase;
+    MotionCenterAction after_center;
+    uint16_t center_speed;
     uint16_t step;
     uint32_t deadline;
     uint32_t window_end;
@@ -57,10 +67,10 @@ static void mouse_motion_draw(Canvas* canvas, void* context)
     canvas_set_font(canvas, FontPrimary);
     canvas_draw_str(canvas, 0, 10, "USB Mouse Motion");
     canvas_set_font(canvas, FontSecondary);
-    const char* status = "PAUSED";
+    const char* status = app->position.x != 0 || app->position.y != 0 ? "OFF CENTER" : "PAUSED";
     if (app->running)
     {
-        status = app->testing ? "TEST" : (app->phase == MotionPhaseMove ? "MOVING" : "WAITING");
+        status = app->phase == MotionPhaseCenter ? "CENTERING" : (app->testing ? "TEST" : (app->phase == MotionPhaseMove ? "MOVING" : "WAITING"));
     }
     char text[32];
     snprintf(text, sizeof(text), "%s  USB:%s", status,
@@ -141,6 +151,7 @@ static void mouse_motion_stop(MouseMotion* app)
 {
     app->running = false;
     app->testing = false;
+    app->after_center = MotionCenterPause;
     if (app->pressed_button != 0U)
     {
         furi_hal_hid_mouse_release(app->pressed_button);
@@ -148,7 +159,7 @@ static void mouse_motion_stop(MouseMotion* app)
     }
 }
 
-static void mouse_motion_begin_test(MouseMotion* app)
+static void mouse_motion_start_test(MouseMotion* app)
 {
     mouse_motion_stop(app);
     if (!furi_hal_hid_is_connected())
@@ -243,6 +254,79 @@ static void mouse_motion_begin_window(MouseMotion* app)
     app->step = 0U;
 }
 
+static uint32_t mouse_motion_travel_ticks(MotionPoint from, MotionPoint to, uint16_t speed)
+{
+    const float distance = hypotf((float)(to.x - from.x), (float)(to.y - from.y));
+    uint32_t delay_ms = (uint32_t)ceilf(distance * 1000.0f / speed);
+    if (delay_ms < 2U)
+    {
+        delay_ms = 2U;
+    }
+    return furi_ms_to_ticks(delay_ms);
+}
+
+static void mouse_motion_finish_center(MouseMotion* app)
+{
+    if (app->after_center == MotionCenterTest)
+    {
+        mouse_motion_start_test(app);
+    }
+    else if (app->after_center == MotionCenterRun)
+    {
+        app->running = true;
+        mouse_motion_begin_window(app);
+    }
+    else
+    {
+        mouse_motion_stop(app);
+    }
+}
+
+static void mouse_motion_request_center(MouseMotion* app, MotionCenterAction action)
+{
+    mouse_motion_stop(app);
+    if (!furi_hal_hid_is_connected())
+    {
+        return;
+    }
+    app->after_center = action;
+    if (app->position.x == 0 && app->position.y == 0)
+    {
+        mouse_motion_finish_center(app);
+        return;
+    }
+    app->running = true;
+    app->phase = MotionPhaseCenter;
+    app->center_speed = app->settings.min_speed;
+    const MotionPoint next = motion_path_return_step(app->position);
+    app->deadline = furi_get_tick() + mouse_motion_travel_ticks(app->position, next, app->center_speed);
+}
+
+static void mouse_motion_center_tick(MouseMotion* app)
+{
+    const MotionPoint next = motion_path_return_step(app->position);
+    const int8_t dx = next.x - app->position.x;
+    const int8_t dy = next.y - app->position.y;
+    if (!furi_hal_hid_mouse_move(dx, dy))
+    {
+        mouse_motion_stop(app);
+        return;
+    }
+    app->position = next;
+    if (next.x == 0 && next.y == 0)
+    {
+        mouse_motion_finish_center(app);
+        return;
+    }
+    const MotionPoint following = motion_path_return_step(next);
+    app->deadline = furi_get_tick() + mouse_motion_travel_ticks(next, following, app->center_speed);
+}
+
+static void mouse_motion_begin_test(MouseMotion* app)
+{
+    mouse_motion_request_center(app, MotionCenterTest);
+}
+
 static void mouse_motion_press(MouseMotion* app)
 {
     app->pressed_button = app->burst_button;
@@ -260,6 +344,11 @@ static void mouse_motion_tick(MouseMotion* app)
     if (!furi_hal_hid_is_connected())
     {
         mouse_motion_stop(app);
+        return;
+    }
+    if (app->phase == MotionPhaseCenter)
+    {
+        mouse_motion_center_tick(app);
         return;
     }
     if (app->phase == MotionPhaseRest)
@@ -308,13 +397,7 @@ static void mouse_motion_tick(MouseMotion* app)
     if (next.x != target.x || next.y != target.y)
     {
         const MotionPoint following = motion_path_advance(app->movement_area, next, target);
-        const float distance = hypotf((float)(following.x - next.x), (float)(following.y - next.y));
-        uint32_t delay_ms = (uint32_t)ceilf(distance * 1000.0f / app->movement_speed_limit);
-        if (delay_ms < 2U)
-        {
-            delay_ms = 2U;
-        }
-        app->deadline = furi_get_tick() + furi_ms_to_ticks(delay_ms);
+        app->deadline = furi_get_tick() + mouse_motion_travel_ticks(next, following, app->movement_speed_limit);
         return;
     }
     app->step += app->point_stride;
@@ -346,12 +429,11 @@ static void mouse_motion_toggle(MouseMotion* app)
 {
     if (app->running)
     {
-        mouse_motion_stop(app);
+        mouse_motion_request_center(app, MotionCenterPause);
     }
     else if (furi_hal_hid_is_connected())
     {
-        app->running = true;
-        mouse_motion_begin_window(app);
+        mouse_motion_request_center(app, MotionCenterRun);
     }
 }
 
