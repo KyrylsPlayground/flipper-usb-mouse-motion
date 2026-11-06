@@ -2,7 +2,7 @@
 
 A Flipper Zero USB HID application with smooth randomized mouse movement, configurable click bursts, and a rectangular boundary test.
 
-Current version: **1.6.2**. Starts paused. Settings reset when the app closes.
+Current version: **1.6.3**. Starts paused. Settings reset when the app closes.
 
 ## Features
 
@@ -20,7 +20,7 @@ Current version: **1.6.2**. Starts paused. Settings reset when the app closes.
 | --- | --- |
 | Up / Down | Select a setting; scrolls automatically |
 | Left / Right | Change the selected value |
-| Hold Left / Right | Repeat value changes; speed values change in steps of 25 |
+| Hold Left / Right | Repeat value changes; dimensions and speeds change in steps of 25 |
 | Single OK | Start / pause, after a 350 ms double-tap detection window |
 | Double OK | Run the boundary test, then return to pause |
 | Back | Exit and restore the previous USB configuration |
@@ -31,8 +31,8 @@ Holding OK is not required. Pause releases the pressed button, returns to the tr
 
 | Setting | Range / options | Default |
 | --- | --- | --- |
-| X width | 50–1000 HID counts, step 50 | 200 |
-| Y height | 50–1000 HID counts, step 50 | 200 |
+| X width | 50–1000 HID counts, step 1; hold-repeat 25 | 200 |
+| Y height | 50–1000 HID counts, step 1; hold-repeat 25 | 200 |
 | Interval | 1–99 seconds | 10 seconds |
 | Minimum speed | 50–2000 HID counts/second | 314 |
 | Maximum speed | 50–2000 HID counts/second | 700 |
@@ -44,6 +44,8 @@ Holding OK is not required. Pause releases the pressed button, returns to the tr
 Minimum values cannot exceed their corresponding maximum values. A short Left/Right changes a speed by 1. Set both click counts to **0** for movement only. Each cycle randomly chooses its click count within the selected range; zero skips clicking. Presses last 25–60 ms with 50–90 ms gaps, which the host may interpret as double/triple clicks.
 
 X/Y are the **full width and height**, not radii. For example, X=400 and Y=200 gives relative bounds of ±200 horizontally and ±100 vertically.
+
+Odd dimensions use integer bounds that retain the exact selected size: X=501 gives -250..+251. The extra HID count is on the positive side.
 
 Movement settings and click counts apply to the next cycle. The selected button applies to the next burst and stays unchanged throughout that burst. A running test keeps the settings captured at its start.
 
@@ -131,6 +133,7 @@ The version commits were created retrospectively by replaying recorded edits fro
 | 1.6.0 | Scrolling settings list, adjustable speeds/click counts, three test modes, single-OK start/pause |
 | 1.6.1 | Clamp every move to fixed bounds and calculate deltas from the latest tracked offset |
 | 1.6.2 | Offset-relative path bounds; return to center before pause, resume, and boundary tests |
+| 1.6.3 | Dimension step 1 / hold-repeat 25 and exact odd-sized rectangular bounds |
 
 ## License
 

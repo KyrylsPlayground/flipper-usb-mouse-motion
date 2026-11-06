@@ -51,10 +51,10 @@ void motion_settings_adjust(MotionSettings* settings, int direction, bool repeat
     switch (settings->selected)
     {
         case MotionItemWidth:
-            settings->area.width = motion_settings_change(settings->area.width, direction * 50, 50U, 1000U);
+            settings->area.width = motion_settings_change(settings->area.width, direction * (repeat ? 25 : 1), 50U, 1000U);
             break;
         case MotionItemHeight:
-            settings->area.height = motion_settings_change(settings->area.height, direction * 50, 50U, 1000U);
+            settings->area.height = motion_settings_change(settings->area.height, direction * (repeat ? 25 : 1), 50U, 1000U);
             break;
         case MotionItemInterval:
             settings->interval = motion_settings_change(settings->interval, direction, 1U, 99U);

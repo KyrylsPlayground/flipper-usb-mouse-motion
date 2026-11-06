@@ -17,9 +17,9 @@ MotionRelativeBounds motion_path_relative_bounds(MotionArea area, MotionPoint po
     return (MotionRelativeBounds)
     {
         .min_x = -half_x - position.x,
-        .max_x = half_x - position.x,
+        .max_x = (int32_t)area.width - half_x - position.x,
         .min_y = -half_y - position.y,
-        .max_y = half_y - position.y,
+        .max_y = (int32_t)area.height - half_y - position.y,
     };
 }
 
@@ -44,21 +44,23 @@ MotionPoint motion_path_clamp(MotionArea area, MotionPoint point)
 {
     const int16_t half_x = area.width / 2U;
     const int16_t half_y = area.height / 2U;
+    const int16_t max_x = area.width - half_x;
+    const int16_t max_y = area.height - half_y;
     if (point.x < -half_x)
     {
         point.x = -half_x;
     }
-    if (point.x > half_x)
+    if (point.x > max_x)
     {
-        point.x = half_x;
+        point.x = max_x;
     }
     if (point.y < -half_y)
     {
         point.y = -half_y;
     }
-    if (point.y > half_y)
+    if (point.y > max_y)
     {
-        point.y = half_y;
+        point.y = max_y;
     }
     return point;
 }
