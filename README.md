@@ -1,16 +1,24 @@
-# USB Mouse Motion
+# USB Mouse Motion 1.0.0
 
-A Flipper Zero USB HID mouse application project.
+- Left/Right: radius 25..500 relative HID counts (host acceleration and screen edges affect pixels).
+- Up/Down: interval 1..30 seconds.
+- Short OK: left/right click after finishing the trajectory.
+- Long OK: start/pause. Back: exit. Starts paused.
+- Radius and interval changes apply to the next cycle. Click selection applies to the next click.
 
-This initial commit establishes the repository documentation, ignore rules, and license.
-Application source code and version-specific controls and build instructions are added
-in the following commits.
+Each interval contains one new smooth, randomly shaped closed path and one click.
+The start time is random within the time left after reserving movement and click time.
+Movement adapts to short intervals: approximately 0.4 seconds at 1 second,
+approximately 2 seconds at intervals of 5 seconds or longer.
+The requested radius bounds the path relative to its starting position.
+Stop interrupts motion immediately; completing a path returns the relative HID offset to zero.
+USB failures pause the application. Host acceleration/clipping can prevent an exact on-screen return.
 
-## Development history
+USB identity: VID 046D, PID C52B, manufacturer Logitech, product USB Receiver,
+as requested from the user's receiver. Uses the firmware's standard combined keyboard/mouse
+HID descriptor; these settings do not reproduce the real receiver's descriptors or behavior.
 
-Version commits are reconstructed from the recorded development edits. Commit dates
-reflect reconstruction, not the original editing times. Each version updates this
-README to describe the code included in that commit.
+Build with `ufbt` in this folder, or `./fbt fap_usb_mouse_motion` in a complete firmware checkout.
 
 ## License
 

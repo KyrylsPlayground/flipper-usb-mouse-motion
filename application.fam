@@ -1,0 +1,10 @@
+App(
+    appid="usb_mouse_motion",
+    name="USB Mouse Motion",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="usb_mouse_motion_app",
+    stack_size=2 * 1024,
+    fap_category="USB",
+    fap_version="1.0.0",
+    fap_description="Random smooth closed mouse paths and configurable clicks",
+)
