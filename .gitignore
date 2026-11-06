@@ -1,0 +1,9 @@
+.DS_Store
+.vscode/
+dist/
+.ufbt/
+*.o
+*.elf
+*.fap
+.venv/
+__pycache__/
