@@ -2,13 +2,13 @@
 
 A Flipper Zero USB HID application with smooth mouse movement along random, circular or rectangular paths, configurable click bursts, and a rectangular boundary test.
 
-Current version: **1.9.1**. Settings are restored from the SD card. Starts paused.
+Current version: **1.9.2**. Settings are restored from the SD card. Starts paused.
 
 ## Features
 
 - Independent X/Y dimensions around a fixed center, with tracked offsets to avoid cumulative endpoint drift.
 - Random spline paths with endpoint variation, or closed circle/rectangle paths.
-- Interpolated 2–4 ms HID microsteps with exact segment endpoints; display refresh limited to 10 Hz.
+- Interpolated 2–4 ms HID microsteps with exact segment endpoints and event-driven display updates.
 - Random start time within each cycle and a configurable interval up to 99 seconds.
 - Adjustable minimum and maximum moving speeds.
 - Configurable left/right click bursts, including movement-only operation.
@@ -65,8 +65,8 @@ All eleven configurable parameters are saved to `apps_data/usb_mouse_motion/.set
 on the Flipper SD card and restored on the next launch. A save is requested 500 ms
 after the last Left/Right edit while paused. Changes made during movement wait until
 the app pauses; exiting with Back also flushes pending changes. Storage writes never
-run during movement or centering. Failed saves show SAVE ERROR while paused and retry
-after 2 seconds.
+run during movement or centering. Failed saves are logged and retried after 2 seconds
+while paused; diagnostics are not displayed on the app screen.
 
 The file has a type/version header and validated numeric ranges. Version 2 adds the path selection; existing version-1 files retain all previous settings and default to Random. Missing or invalid
 settings fall back to defaults. Writing uses a temporary `.settings.tmp`; a complete
@@ -94,12 +94,12 @@ speed lower than selected. All delays are scheduled from completion of the previ
 HID submission: delayed execution does not catch up by sending a burst of overdue moves.
 Runtime overhead can lengthen a cycle or the nominal 2-second Standard boundary test.
 
-The title shows the installed version, and the status line shows tracked X,Y offsets.
-For diagnosis, a completed pause should show **PAUSED 0,0**. These coordinates track
-successful relative HID submissions, not feedback from the host's screen pointer.
-A screen pointer that remains displaced while this line reads zero requires host-side
-observation of the received reports/pointer transform; it is not proof of a new logical
-origin or of cumulative offset in the application's counter.
+The title shows the installed version; the status line shows the operating state
+and USB connection. Tracked offsets and error diagnostics are not displayed. UI updates
+are requested only when settings, selection, visible status or USB connection change.
+Movement microsteps, unchanged button events and background-save retries do not redraw
+the screen. There is no periodic UI refresh; an idle app waits for input/USB events
+or a pending action deadline.
 
 The origin is fixed when the application opens and is not shifted between cycles.
 A random endpoint displacement is added to the current tracked offset, then clamped
@@ -112,8 +112,8 @@ send the inverse relative displacement; the counter is never simply reset to zer
 Every move is still clamped to the area captured at movement start. After resizing
 below the current offset, the next cycle first centers in small inward steps. Start after
 an interrupted return also centers before generating a new path. Disconnects and
-failed reports hard-stop without discarding the offset; the paused UI shows OFF CENTER
-if centering did not complete. Back exits immediately rather than delaying exit for
+failed reports hard-stop without discarding the offset, which remains available for
+the next centering attempt. Back exits immediately rather than delaying exit for
 centering.
 
 **HID counts are not screen pixels.** Host acceleration, screen edges, manual mouse movement, USB disconnects, and runtime scheduling can change the on-screen path or timing. This is not a validated model of human motion or a guarantee of undetectability.
@@ -186,6 +186,7 @@ The version commits were created retrospectively by replaying recorded edits fro
 | 1.8.0 | Save and restore settings on the SD card; paused autosave and exit flush |
 | 1.9.0 | Fine-grained HID streaming, throttled display updates, and saved Random/Circle/Rectangle path selection |
 | 1.9.1 | Start-on-circumference oriented circles and start-corner rectangles without entry/exit segments |
+| 1.9.2 | Remove on-screen diagnostics and redraw only on visible state changes |
 
 ## License
 

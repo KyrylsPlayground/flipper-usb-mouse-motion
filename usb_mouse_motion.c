@@ -3,6 +3,7 @@
 #include <gui/gui.h>
 #include <input/input.h>
 #include <math.h>
+#include <string.h>
 #include "motion_path.h"
 #include "motion_timing.h"
 #include "motion_tap.h"
@@ -14,7 +15,7 @@
 #define SETTINGS_SAVE_DELAY_MS 500U
 #define SETTINGS_SAVE_RETRY_MS 2000U
 #define MOTION_FRAME_MS 4U
-#define UI_REFRESH_MS 100U
+#define MOTION_UI_FIELDS 15U
 
 typedef enum
 {
@@ -32,6 +33,31 @@ typedef enum
     MotionCenterRun,
     MotionCenterTest,
 } MotionCenterAction;
+
+typedef enum
+{
+    MotionEventInput,
+    MotionEventConnection,
+} MotionEventType;
+
+typedef struct
+{
+    MotionEventType type;
+    union
+    {
+        InputEvent input;
+        bool connected;
+    };
+} MotionEvent;
+
+typedef enum
+{
+    MotionUiPaused,
+    MotionUiWaiting,
+    MotionUiMoving,
+    MotionUiCentering,
+    MotionUiTest,
+} MotionUiStatus;
 
 typedef struct
 {
@@ -69,9 +95,62 @@ typedef struct
     uint32_t click_gap_ticks[MOTION_CLICK_LIMIT - 1U];
     uint16_t point_stride;
     FuriHalUsbHidConfig usb_config;
+    uint32_t ui_values[MOTION_UI_FIELDS];
+    bool ui_valid;
 } MouseMotion;
 
 static void mouse_motion_request_center(MouseMotion* app, MotionCenterAction action);
+
+static MotionUiStatus mouse_motion_ui_status(const MouseMotion* app)
+{
+    if (!app->running)
+    {
+        return MotionUiPaused;
+    }
+    if (app->phase == MotionPhaseCenter)
+    {
+        return MotionUiCentering;
+    }
+    if (app->testing)
+    {
+        return MotionUiTest;
+    }
+    return app->phase == MotionPhaseMove ? MotionUiMoving : MotionUiWaiting;
+}
+
+static void mouse_motion_update_ui(MouseMotion* app)
+{
+    furi_mutex_acquire(app->mutex, FuriWaitForever);
+    const uint32_t values[MOTION_UI_FIELDS] =
+    {
+        app->settings.area.width,
+        app->settings.area.height,
+        app->settings.trajectory,
+        app->settings.interval,
+        app->settings.min_speed,
+        app->settings.max_speed,
+        app->settings.work_mode,
+        app->settings.right_button,
+        app->settings.min_clicks,
+        app->settings.max_clicks,
+        app->settings.test_mode,
+        app->settings.selected,
+        app->settings.first_visible,
+        mouse_motion_ui_status(app),
+        furi_hal_hid_is_connected(),
+    };
+    const bool changed = !app->ui_valid || memcmp(app->ui_values, values, sizeof(values)) != 0;
+    if (changed)
+    {
+        memcpy(app->ui_values, values, sizeof(values));
+        app->ui_valid = true;
+    }
+    furi_mutex_release(app->mutex);
+    if (changed)
+    {
+        view_port_update(app->viewport);
+    }
+}
 
 static void mouse_motion_draw(Canvas* canvas, void* context)
 {
@@ -85,18 +164,13 @@ static void mouse_motion_draw(Canvas* canvas, void* context)
     canvas_draw_str(canvas, 0, 10, "Mouse Motion");
 #endif
     canvas_set_font(canvas, FontSecondary);
-    const char* status = app->position.x != 0 || app->position.y != 0 ? "OFF CENTER" : "PAUSED";
-    if (app->settings_save_error)
+    static const char* const statuses[] =
     {
-        status = "SAVE ERROR";
-    }
-    if (app->running)
-    {
-        status = app->phase == MotionPhaseCenter ? "CENTERING" : (app->testing ? "TEST" : (app->phase == MotionPhaseMove ? "MOVING" : "WAITING"));
-    }
+        "PAUSED", "WAITING", "MOVING", "CENTERING", "TEST"
+    };
     char text[32];
-    snprintf(text, sizeof(text), "%s %d,%d%s", status, app->position.x, app->position.y,
-             furi_hal_hid_is_connected() ? "" : " USB-");
+    snprintf(text, sizeof(text), "%s  USB:%s", statuses[mouse_motion_ui_status(app)],
+             furi_hal_hid_is_connected() ? "ON" : "OFF");
     canvas_draw_str(canvas, 0, 21, text);
     for (uint8_t row = 0U; row < 4U; row++)
     {
@@ -198,7 +272,23 @@ static void mouse_motion_draw(Canvas* canvas, void* context)
 static void mouse_motion_input(InputEvent* input, void* context)
 {
     MouseMotion* app = context;
-    furi_message_queue_put(app->queue, input, 0U);
+    const MotionEvent event =
+    {
+        .type = MotionEventInput,
+        .input = *input,
+    };
+    furi_message_queue_put(app->queue, &event, 0U);
+}
+
+static void mouse_motion_connection(bool connected, void* context)
+{
+    FuriMessageQueue* queue = context;
+    const MotionEvent event =
+    {
+        .type = MotionEventConnection,
+        .connected = connected,
+    };
+    furi_message_queue_put(queue, &event, 0U);
 }
 
 static void mouse_motion_stop(MouseMotion* app)
@@ -616,7 +706,7 @@ int32_t usb_mouse_motion_app(void* context)
     MouseMotion* app = calloc(1, sizeof(MouseMotion));
     motion_settings_init(&app->settings);
     motion_settings_load(&app->settings);
-    app->queue = furi_message_queue_alloc(16, sizeof(InputEvent));
+    app->queue = furi_message_queue_alloc(16, sizeof(MotionEvent));
     app->mutex = furi_mutex_alloc(FuriMutexTypeNormal);
     app->viewport = view_port_alloc();
     app->usb_config = (FuriHalUsbHidConfig)
@@ -636,12 +726,13 @@ int32_t usb_mouse_motion_app(void* context)
         view_port_draw_callback_set(app->viewport, mouse_motion_draw, app);
         view_port_input_callback_set(app->viewport, mouse_motion_input, app);
         gui_add_view_port(gui, app->viewport, GuiLayerFullscreen);
+        furi_hal_hid_set_state_callback(mouse_motion_connection, app->queue);
+        mouse_motion_update_ui(app);
         bool keep_running = true;
-        uint32_t ui_deadline = furi_get_tick();
         while (keep_running)
         {
-            InputEvent input;
-            uint32_t timeout = mouse_motion_remaining(ui_deadline, furi_get_tick());
+            MotionEvent event;
+            uint32_t timeout = FuriWaitForever;
             if (app->settings_dirty && !app->running)
             {
                 const uint32_t remaining = mouse_motion_remaining(app->settings_save_deadline, furi_get_tick());
@@ -666,7 +757,7 @@ int32_t usb_mouse_motion_app(void* context)
                     timeout = remaining;
                 }
             }
-            const FuriStatus status = furi_message_queue_get(app->queue, &input, timeout);
+            const FuriStatus status = furi_message_queue_get(app->queue, &event, timeout);
             furi_mutex_acquire(app->mutex, FuriWaitForever);
             if (motion_tap_expired(&app->ok_tap, furi_get_tick()))
             {
@@ -674,7 +765,14 @@ int32_t usb_mouse_motion_app(void* context)
             }
             if (status == FuriStatusOk)
             {
-                keep_running = mouse_motion_handle_input(app, &input);
+                if (event.type == MotionEventInput)
+                {
+                    keep_running = mouse_motion_handle_input(app, &event.input);
+                }
+                else if (!event.connected)
+                {
+                    mouse_motion_stop(app);
+                }
             }
             if (keep_running && app->running && mouse_motion_remaining(app->deadline, furi_get_tick()) == 0U)
             {
@@ -685,12 +783,9 @@ int32_t usb_mouse_motion_app(void* context)
             {
                 mouse_motion_save_settings(app);
             }
-            if (status == FuriStatusOk || mouse_motion_remaining(ui_deadline, furi_get_tick()) == 0U)
-            {
-                view_port_update(app->viewport);
-                ui_deadline = furi_get_tick() + furi_ms_to_ticks(UI_REFRESH_MS);
-            }
+            mouse_motion_update_ui(app);
         }
+        furi_hal_hid_set_state_callback(NULL, NULL);
         furi_mutex_acquire(app->mutex, FuriWaitForever);
         mouse_motion_stop(app);
         furi_mutex_release(app->mutex);
