@@ -10,6 +10,55 @@ typedef struct
     float y;
 } PathAnchor;
 
+MotionPoint motion_path_clamp(MotionArea area, MotionPoint point)
+{
+    const int16_t half_x = area.width / 2U;
+    const int16_t half_y = area.height / 2U;
+    if (point.x < -half_x)
+    {
+        point.x = -half_x;
+    }
+    if (point.x > half_x)
+    {
+        point.x = half_x;
+    }
+    if (point.y < -half_y)
+    {
+        point.y = -half_y;
+    }
+    if (point.y > half_y)
+    {
+        point.y = half_y;
+    }
+    return point;
+}
+
+MotionPoint motion_path_advance(MotionArea area, MotionPoint position, MotionPoint target)
+{
+    target = motion_path_clamp(area, target);
+    int32_t dx = (int32_t)target.x - position.x;
+    int32_t dy = (int32_t)target.y - position.y;
+    if (dx < -127)
+    {
+        dx = -127;
+    }
+    if (dx > 127)
+    {
+        dx = 127;
+    }
+    if (dy < -127)
+    {
+        dy = -127;
+    }
+    if (dy > 127)
+    {
+        dy = 127;
+    }
+    position.x += dx;
+    position.y += dy;
+    return position;
+}
+
 static float motion_random(uint32_t* seed)
 {
     *seed ^= *seed << 13;
@@ -77,6 +126,7 @@ void motion_path_generate_test(MotionPath* path, MotionArea area, MotionPoint st
         {
             (int16_t)lroundf(x), (int16_t)lroundf(y)
         };
+        path->points[i] = motion_path_clamp(area, path->points[i]);
     }
     path->points[0] = start;
     path->points[MOTION_PATH_STEPS] = (MotionPoint)
@@ -108,9 +158,8 @@ void motion_path_generate(MotionPath* path, MotionArea area, MotionPoint start, 
     };
     const float half_x = area.width / 2.0f;
     const float half_y = area.height / 2.0f;
-    // If resized while paused, recover from the tracked position on each axis.
-    const float limit_x = fmaxf(fabsf((float)start.x), half_x) - 1.0f;
-    const float limit_y = fmaxf(fabsf((float)start.y), half_y) - 1.0f;
+    const float limit_x = half_x - 1.0f;
+    const float limit_y = half_y - 1.0f;
     float angle = motion_random(&seed) * MOTION_TAU;
     const float direction = motion_random(&seed) < 0.5f ? -1.0f : 1.0f;
     for (uint16_t i = 1U; i < PATH_SEGMENTS; i++)

@@ -2,7 +2,7 @@
 
 A Flipper Zero USB HID application with smooth randomized mouse movement, configurable click bursts, and a rectangular boundary test.
 
-Current version: **1.6.0**. Starts paused. Settings reset when the app closes.
+Current version: **1.6.1**. Starts paused. Settings reset when the app closes.
 
 ## Features
 
@@ -116,6 +116,7 @@ The version commits were created retrospectively by replaying recorded edits fro
 | 1.5.2 | Mouse-with-sparkle menu icon |
 | 1.5.3 | Minimum speed 314 |
 | 1.6.0 | Scrolling settings list, adjustable speeds/click counts, three test modes, single-OK start/pause |
+| 1.6.1 | Clamp every move to fixed bounds and calculate deltas from the latest tracked offset |
 
 ## License
 
