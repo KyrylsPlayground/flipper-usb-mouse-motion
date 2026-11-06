@@ -1,8 +1,13 @@
-# USB Mouse Motion 1.2.1
+# USB Mouse Motion 1.3.0
 
 - Left/Right: radius 25..500 relative HID counts (not screen pixels).
 - Up/Down: interval 1..30 seconds.
 - Short OK: left/right button for the next burst. Long OK: start/pause. Back: exit.
+- Double OK (within 350 ms): interrupt normal operation, travel to the boundary,
+  trace the circular boundary of the selected radius, then return to the fixed center.
+  The test takes approximately 2 seconds, sends no mouse clicks, and finishes paused.
+  Long OK can stop the test; Back exits. A single OK is delayed 350 ms to distinguish
+  it from a double tap. Radius changes during a test apply to the next run.
 - Starts paused. Radius/interval changes apply next cycle. A burst uses one button throughout.
 
 Each cycle generates a new spline through random waypoints within the chosen radius.

@@ -18,6 +18,42 @@ static float motion_random(uint32_t* seed)
     return (float)(*seed & 0xFFFFU) / 65535.0f;
 }
 
+void motion_path_generate_test(MotionPath* path, uint16_t radius, MotionPoint start)
+{
+    const float edge = radius - 1.0f;
+    for (uint16_t i = 0U; i <= MOTION_PATH_STEPS; i++)
+    {
+        float x;
+        float y;
+        if (i <= 16U)
+        {
+            const float t = (float)i / 16.0f;
+            x = start.x + (edge - start.x) * t;
+            y = start.y * (1.0f - t);
+        }
+        else if (i <= 112U)
+        {
+            const float angle = (float)(i - 16U) * MOTION_TAU / 96.0f;
+            x = cosf(angle) * edge;
+            y = sinf(angle) * edge;
+        }
+        else
+        {
+            x = edge * (MOTION_PATH_STEPS - i) / 16.0f;
+            y = 0.0f;
+        }
+        path->points[i] = (MotionPoint)
+        {
+            (int16_t)lroundf(x), (int16_t)lroundf(y)
+        };
+    }
+    path->points[0] = start;
+    path->points[MOTION_PATH_STEPS] = (MotionPoint)
+    {
+        0, 0
+    };
+}
+
 static float motion_interpolate(float a, float b, float c, float d, float t)
 {
     return 0.5f * (2.0f * b + (c - a) * t +

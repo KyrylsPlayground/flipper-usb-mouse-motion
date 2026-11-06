@@ -4,12 +4,15 @@
 #include <input/input.h>
 #include "motion_path.h"
 #include "motion_timing.h"
+#include "motion_tap.h"
 
 #define RADIUS_MIN 25U
 #define RADIUS_MAX 500U
 #define RADIUS_STEP 25U
 #define INTERVAL_MIN 1U
 #define INTERVAL_MAX 30U
+#define DOUBLE_TAP_MS 350U
+#define TEST_DURATION_MS 2000U
 
 typedef enum
 {
@@ -32,6 +35,8 @@ typedef struct
     uint8_t button;
     uint8_t pressed_button;
     bool running;
+    bool testing;
+    MotionTap ok_tap;
     MotionPhase phase;
     uint16_t step;
     uint32_t deadline;
@@ -59,7 +64,7 @@ static void mouse_motion_draw(Canvas* canvas, void* context)
     const char* status = "PAUSED";
     if (app->running)
     {
-        status = app->phase == MotionPhaseMove ? "MOVING" : "WAITING";
+        status = app->testing ? "TEST" : (app->phase == MotionPhaseMove ? "MOVING" : "WAITING");
     }
     char text[32];
     snprintf(text, sizeof(text), "%s  USB:%s", status,
@@ -71,7 +76,7 @@ static void mouse_motion_draw(Canvas* canvas, void* context)
     canvas_draw_str(canvas, 0, 42, text);
     snprintf(text, sizeof(text), "OK: %s (1-3 clicks)", app->button == HID_MOUSE_BTN_LEFT ? "Left" : "Right");
     canvas_draw_str(canvas, 0, 52, text);
-    canvas_draw_str(canvas, 0, 63, "Hold OK:run/pause Back:exit");
+    canvas_draw_str(canvas, 0, 63, "Hold:run 2x:test Back:exit");
     furi_mutex_release(app->mutex);
 }
 
@@ -84,10 +89,32 @@ static void mouse_motion_input(InputEvent* input, void* context)
 static void mouse_motion_stop(MouseMotion* app)
 {
     app->running = false;
+    app->testing = false;
     if (app->pressed_button != 0U)
     {
         furi_hal_hid_mouse_release(app->pressed_button);
         app->pressed_button = 0U;
+    }
+}
+
+static void mouse_motion_begin_test(MouseMotion* app)
+{
+    mouse_motion_stop(app);
+    if (!furi_hal_hid_is_connected())
+    {
+        return;
+    }
+    motion_path_generate_test(&app->path, app->radius, app->position);
+    app->running = true;
+    app->testing = true;
+    app->phase = MotionPhaseMove;
+    app->step = 0U;
+    app->point_stride = 1U;
+    app->motion_start = furi_get_tick();
+    app->deadline = app->motion_start;
+    for (uint16_t i = 0U; i < MOTION_PATH_STEPS; i++)
+    {
+        app->motion_offsets[i] = furi_ms_to_ticks(TEST_DURATION_MS) * i / (MOTION_PATH_STEPS - 1U);
     }
 }
 
@@ -199,8 +226,15 @@ static void mouse_motion_tick(MouseMotion* app)
     app->step += app->point_stride;
     if (app->step == MOTION_PATH_STEPS)
     {
-        app->burst_button = app->button;
-        mouse_motion_press(app);
+        if (app->testing)
+        {
+            mouse_motion_stop(app);
+        }
+        else
+        {
+            app->burst_button = app->button;
+            mouse_motion_press(app);
+        }
     }
     else
     {
@@ -214,12 +248,14 @@ static bool mouse_motion_handle_input(MouseMotion* app, const InputEvent* input)
 {
     if (input->key == InputKeyBack && input->type == InputTypeShort)
     {
+        app->ok_tap.pending = false;
         return false;
     }
     if (input->key == InputKeyOk)
     {
         if (input->type == InputTypeLong)
         {
+            app->ok_tap.pending = false;
             if (app->running)
             {
                 mouse_motion_stop(app);
@@ -232,7 +268,10 @@ static bool mouse_motion_handle_input(MouseMotion* app, const InputEvent* input)
         }
         else if (input->type == InputTypeShort)
         {
-            app->button = app->button == HID_MOUSE_BTN_LEFT ? HID_MOUSE_BTN_RIGHT : HID_MOUSE_BTN_LEFT;
+            if (motion_tap_short(&app->ok_tap, furi_get_tick(), furi_ms_to_ticks(DOUBLE_TAP_MS)))
+            {
+                mouse_motion_begin_test(app);
+            }
         }
     }
     else if (input->type == InputTypeShort || input->type == InputTypeRepeat)
@@ -289,6 +328,14 @@ int32_t usb_mouse_motion_app(void* context)
         {
             InputEvent input;
             uint32_t timeout = furi_ms_to_ticks(250U);
+            if (app->ok_tap.pending)
+            {
+                const uint32_t remaining = mouse_motion_remaining(app->ok_tap.deadline, furi_get_tick());
+                if (remaining < timeout)
+                {
+                    timeout = remaining;
+                }
+            }
             if (app->running)
             {
                 const uint32_t remaining = mouse_motion_remaining(app->deadline, furi_get_tick());
@@ -299,6 +346,10 @@ int32_t usb_mouse_motion_app(void* context)
             }
             const FuriStatus status = furi_message_queue_get(app->queue, &input, timeout);
             furi_mutex_acquire(app->mutex, FuriWaitForever);
+            if (motion_tap_expired(&app->ok_tap, furi_get_tick()))
+            {
+                app->button = app->button == HID_MOUSE_BTN_LEFT ? HID_MOUSE_BTN_RIGHT : HID_MOUSE_BTN_LEFT;
+            }
             if (status == FuriStatusOk)
             {
                 keep_running = mouse_motion_handle_input(app, &input);

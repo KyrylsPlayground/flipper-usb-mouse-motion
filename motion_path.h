@@ -16,3 +16,4 @@ typedef struct
 } MotionPath;
 
 void motion_path_generate(MotionPath* path, uint16_t radius, MotionPoint start, uint32_t seed);
+void motion_path_generate_test(MotionPath* path, uint16_t radius, MotionPoint start);
