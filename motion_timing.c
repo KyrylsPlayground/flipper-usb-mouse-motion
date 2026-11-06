@@ -1,15 +1,23 @@
 #include "motion_timing.h"
 #include <math.h>
 
-uint32_t motion_timing_test_offsets(const MotionPath* path, uint32_t* offsets_ms)
+uint32_t motion_timing_test_offsets(const MotionPath* path, uint32_t* offsets_ms, uint16_t speed)
 {
+    if (speed == 0U)
+    {
+        for (uint16_t i = 0U; i < MOTION_PATH_STEPS; i++)
+        {
+            offsets_ms[i] = 2000U * (i + 1U) / MOTION_PATH_STEPS;
+        }
+        return 2000U;
+    }
     uint32_t duration_ms = 0U;
     for (uint16_t i = 0U; i < MOTION_PATH_STEPS; i++)
     {
         const MotionPoint from = path->points[i];
         const MotionPoint to = path->points[i + 1U];
         const float distance = hypotf((float)(to.x - from.x), (float)(to.y - from.y));
-        uint32_t delay = (uint32_t)lroundf(distance * 1000.0f / MOTION_SPEED_MIN);
+        uint32_t delay = (uint32_t)lroundf(distance * 1000.0f / speed);
         if (delay < 2U)
         {
             delay = 2U;
@@ -45,7 +53,7 @@ MotionTiming motion_timing_plan(
 
 MotionSpeedTiming motion_timing_speed_offsets(
     const MotionPath* path, uint16_t stride, uint32_t target_ms,
-    uint32_t* offsets_ms, uint32_t seed)
+    uint32_t* offsets_ms, uint32_t seed, uint16_t min_speed, uint16_t max_speed)
 {
     const uint16_t reports = MOTION_PATH_STEPS / stride;
     uint32_t proposed[MOTION_PATH_STEPS];
@@ -65,8 +73,8 @@ MotionSpeedTiming motion_timing_speed_offsets(
         const MotionPoint from = path->points[i * stride];
         const MotionPoint to = path->points[(i + 1U) * stride];
         const float distance = hypotf((float)(to.x - from.x), (float)(to.y - from.y));
-        uint32_t minimum_ms = (uint32_t)ceilf(distance * 1000.0f / MOTION_SPEED_MAX);
-        uint32_t maximum_ms = (uint32_t)floorf(distance * 1000.0f / MOTION_SPEED_MIN);
+        uint32_t minimum_ms = (uint32_t)ceilf(distance * 1000.0f / max_speed);
+        uint32_t maximum_ms = (uint32_t)floorf(distance * 1000.0f / min_speed);
         if (minimum_ms < 2U)
         {
             minimum_ms = 2U;

@@ -5,12 +5,8 @@
 #include "motion_path.h"
 #include "motion_timing.h"
 #include "motion_tap.h"
+#include "motion_settings.h"
 
-#define SIZE_MIN 50U
-#define MOTION_SIZE_MAX 1000U
-#define SIZE_STEP 50U
-#define INTERVAL_MIN 1U
-#define INTERVAL_MAX 99U
 #define DOUBLE_TAP_MS 350U
 
 typedef enum
@@ -29,10 +25,7 @@ typedef struct
     ViewPort* viewport;
     MotionPath path;
     MotionPoint position;
-    MotionArea area;
-    bool edit_y;
-    uint8_t interval;
-    uint8_t button;
+    MotionSettings settings;
     uint8_t pressed_button;
     bool running;
     bool testing;
@@ -47,8 +40,8 @@ typedef struct
     uint8_t click_count;
     uint8_t click_index;
     uint8_t burst_button;
-    uint32_t click_hold_ticks[3];
-    uint32_t click_gap_ticks[2];
+    uint32_t click_hold_ticks[MOTION_CLICK_LIMIT];
+    uint32_t click_gap_ticks[MOTION_CLICK_LIMIT - 1U];
     uint16_t point_stride;
     FuriHalUsbHidConfig usb_config;
 } MouseMotion;
@@ -70,20 +63,68 @@ static void mouse_motion_draw(Canvas* canvas, void* context)
     snprintf(text, sizeof(text), "%s  USB:%s", status,
              furi_hal_hid_is_connected() ? "ON" : "OFF");
     canvas_draw_str(canvas, 0, 21, text);
-    if (app->edit_y)
+    for (uint8_t row = 0U; row < 4U; row++)
     {
-        snprintf(text, sizeof(text), "X:%u  Y:[%u]", app->area.width, app->area.height);
+        const MotionItem item = app->settings.first_visible + row;
+        if (item >= MotionItemCount)
+        {
+            break;
+        }
+        switch (item)
+        {
+            case MotionItemWidth:
+                snprintf(text, sizeof(text), "X width: %u", app->settings.area.width);
+                break;
+            case MotionItemHeight:
+                snprintf(text, sizeof(text), "Y height: %u", app->settings.area.height);
+                break;
+            case MotionItemInterval:
+                snprintf(text, sizeof(text), "Interval: %us", app->settings.interval);
+                break;
+            case MotionItemMinSpeed:
+                snprintf(text, sizeof(text), "Min speed: %u", app->settings.min_speed);
+                break;
+            case MotionItemMaxSpeed:
+                snprintf(text, sizeof(text), "Max speed: %u", app->settings.max_speed);
+                break;
+            case MotionItemButton:
+                snprintf(text, sizeof(text), "Button: %s", app->settings.right_button ? "Right" : "Left");
+                break;
+            case MotionItemTestMode:
+            {
+                const char* label = "Standard";
+                if (app->settings.test_mode == MotionTestMinimum)
+                {
+                    label = "Min speed";
+                }
+                if (app->settings.test_mode == MotionTestMaximum)
+                {
+                    label = "Max speed";
+                }
+                snprintf(text, sizeof(text), "Test: %s", label);
+                break;
+            }
+            case MotionItemMinClicks:
+                snprintf(text, sizeof(text), "Min clicks: %u", app->settings.min_clicks);
+                break;
+            case MotionItemMaxClicks:
+                snprintf(text, sizeof(text), "Max clicks: %u", app->settings.max_clicks);
+                break;
+            default:
+                break;
+        }
+        const uint8_t top = 23U + row * 10U;
+        if (item == app->settings.selected)
+        {
+            canvas_draw_box(canvas, 0, top, 123, 10);
+            canvas_set_color(canvas, ColorWhite);
+        }
+        canvas_draw_str(canvas, 2, top + 8U, text);
+        canvas_set_color(canvas, ColorBlack);
     }
-    else
-    {
-        snprintf(text, sizeof(text), "X:[%u]  Y:%u", app->area.width, app->area.height);
-    }
-    canvas_draw_str(canvas, 0, 32, text);
-    snprintf(text, sizeof(text), "Up/Down Interval: %us", app->interval);
-    canvas_draw_str(canvas, 0, 42, text);
-    snprintf(text, sizeof(text), "OK:%s 2x:test (1-3)", app->button == HID_MOUSE_BTN_LEFT ? "Left" : "Right");
-    canvas_draw_str(canvas, 0, 52, text);
-    canvas_draw_str(canvas, 0, 63, "Hold <>:axis OK:run/pause");
+    canvas_draw_line(canvas, 126, 23, 126, 62);
+    canvas_draw_box(canvas, 125, 23U + app->settings.first_visible * 40U / MotionItemCount,
+                    3, 4U * 40U / MotionItemCount);
     furi_mutex_release(app->mutex);
 }
 
@@ -111,14 +152,23 @@ static void mouse_motion_begin_test(MouseMotion* app)
     {
         return;
     }
-    motion_path_generate_test(&app->path, app->area, app->position);
+    motion_path_generate_test(&app->path, app->settings.area, app->position);
     app->running = true;
     app->testing = true;
     app->phase = MotionPhaseMove;
     app->step = 0U;
     app->point_stride = 1U;
     app->motion_start = furi_get_tick();
-    app->motion_duration = furi_ms_to_ticks(motion_timing_test_offsets(&app->path, app->motion_offsets));
+    uint16_t speed = 0U;
+    if (app->settings.test_mode == MotionTestMinimum)
+    {
+        speed = app->settings.min_speed;
+    }
+    if (app->settings.test_mode == MotionTestMaximum)
+    {
+        speed = app->settings.max_speed;
+    }
+    app->motion_duration = furi_ms_to_ticks(motion_timing_test_offsets(&app->path, app->motion_offsets, speed));
     for (uint16_t i = 0U; i < MOTION_PATH_STEPS; i++)
     {
         app->motion_offsets[i] = furi_ms_to_ticks(app->motion_offsets[i]);
@@ -133,10 +183,11 @@ static uint32_t mouse_motion_remaining(uint32_t deadline, uint32_t now)
 
 static void mouse_motion_begin_window(MouseMotion* app)
 {
-    motion_path_generate(&app->path, app->area, app->position, furi_hal_random_get());
-    const uint32_t interval_ms = app->interval * 1000U;
+    motion_path_generate(&app->path, app->settings.area, app->position, furi_hal_random_get());
+    const uint32_t interval_ms = app->settings.interval * 1000U;
     const uint32_t window_ticks = furi_ms_to_ticks(interval_ms);
-    app->click_count = 1U + furi_hal_random_get() % 3U;
+    app->click_count = app->settings.min_clicks + furi_hal_random_get() %
+                                                      (app->settings.max_clicks - app->settings.min_clicks + 1U);
     app->click_index = 0U;
     uint32_t click_ticks = furi_ms_to_ticks(40U);
     for (uint8_t i = 0U; i < app->click_count; i++)
@@ -149,8 +200,12 @@ static void mouse_motion_begin_window(MouseMotion* app)
             click_ticks += app->click_gap_ticks[i];
         }
     }
+    const uint32_t minimum_planning_ticks = click_ticks + furi_ms_to_ticks(512U);
+    const uint32_t planning_ticks = window_ticks > minimum_planning_ticks
+                                        ? window_ticks
+                                        : minimum_planning_ticks;
     const MotionTiming timing = motion_timing_plan(
-        window_ticks,
+        planning_ticks,
         click_ticks,
         furi_ms_to_ticks(2U),
         furi_hal_random_get(),
@@ -159,7 +214,8 @@ static void mouse_motion_begin_window(MouseMotion* app)
     const uint32_t target_ms = (uint64_t)timing.duration_ticks * 1000U /
                                furi_kernel_get_tick_frequency();
     const MotionSpeedTiming speed = motion_timing_speed_offsets(
-        &app->path, app->point_stride, target_ms, app->motion_offsets, furi_hal_random_get());
+        &app->path, app->point_stride, target_ms, app->motion_offsets, furi_hal_random_get(),
+        app->settings.min_speed, app->settings.max_speed);
     const uint16_t reports = MOTION_PATH_STEPS / app->point_stride;
     for (uint16_t i = 0U; i < reports; i++)
     {
@@ -249,9 +305,14 @@ static void mouse_motion_tick(MouseMotion* app)
         {
             mouse_motion_stop(app);
         }
+        else if (app->click_count == 0U)
+        {
+            app->phase = MotionPhaseRest;
+            app->deadline = app->window_end;
+        }
         else
         {
-            app->burst_button = app->button;
+            app->burst_button = app->settings.right_button ? HID_MOUSE_BTN_RIGHT : HID_MOUSE_BTN_LEFT;
             mouse_motion_press(app);
         }
     }
@@ -259,6 +320,19 @@ static void mouse_motion_tick(MouseMotion* app)
     {
         const uint32_t reports_sent = app->step / app->point_stride;
         app->deadline = app->motion_start + app->motion_offsets[reports_sent];
+    }
+}
+
+static void mouse_motion_toggle(MouseMotion* app)
+{
+    if (app->running)
+    {
+        mouse_motion_stop(app);
+    }
+    else if (furi_hal_hid_is_connected())
+    {
+        app->running = true;
+        mouse_motion_begin_window(app);
     }
 }
 
@@ -274,15 +348,6 @@ static bool mouse_motion_handle_input(MouseMotion* app, const InputEvent* input)
         if (input->type == InputTypeLong)
         {
             app->ok_tap.pending = false;
-            if (app->running)
-            {
-                mouse_motion_stop(app);
-            }
-            else if (furi_hal_hid_is_connected())
-            {
-                app->running = true;
-                mouse_motion_begin_window(app);
-            }
         }
         else if (input->type == InputTypeShort)
         {
@@ -292,31 +357,20 @@ static bool mouse_motion_handle_input(MouseMotion* app, const InputEvent* input)
             }
         }
     }
-    else if (input->type == InputTypeLong && (input->key == InputKeyLeft || input->key == InputKeyRight))
-    {
-        app->edit_y = input->key == InputKeyRight;
-    }
     else if (input->type == InputTypeShort || input->type == InputTypeRepeat)
     {
-        uint16_t* size = app->edit_y ? &app->area.height : &app->area.width;
-        if (input->type == InputTypeShort)
+        if (input->key == InputKeyUp)
         {
-            if (input->key == InputKeyLeft && *size > SIZE_MIN)
-            {
-                *size -= SIZE_STEP;
-            }
-            if (input->key == InputKeyRight && *size < MOTION_SIZE_MAX)
-            {
-                *size += SIZE_STEP;
-            }
+            motion_settings_select(&app->settings, -1);
         }
-        if (input->key == InputKeyUp && app->interval < INTERVAL_MAX)
+        if (input->key == InputKeyDown)
         {
-            app->interval++;
+            motion_settings_select(&app->settings, 1);
         }
-        if (input->key == InputKeyDown && app->interval > INTERVAL_MIN)
+        if (input->key == InputKeyLeft || input->key == InputKeyRight)
         {
-            app->interval--;
+            motion_settings_adjust(&app->settings, input->key == InputKeyRight ? 1 : -1,
+                                   input->type == InputTypeRepeat);
         }
     }
     return true;
@@ -326,12 +380,7 @@ int32_t usb_mouse_motion_app(void* context)
 {
     UNUSED(context);
     MouseMotion* app = calloc(1, sizeof(MouseMotion));
-    app->area = (MotionArea)
-    {
-        200U, 200U
-    };
-    app->interval = 10U;
-    app->button = HID_MOUSE_BTN_RIGHT;
+    motion_settings_init(&app->settings);
     app->queue = furi_message_queue_alloc(16, sizeof(InputEvent));
     app->mutex = furi_mutex_alloc(FuriMutexTypeNormal);
     app->viewport = view_port_alloc();
@@ -377,7 +426,7 @@ int32_t usb_mouse_motion_app(void* context)
             furi_mutex_acquire(app->mutex, FuriWaitForever);
             if (motion_tap_expired(&app->ok_tap, furi_get_tick()))
             {
-                app->button = app->button == HID_MOUSE_BTN_LEFT ? HID_MOUSE_BTN_RIGHT : HID_MOUSE_BTN_LEFT;
+                mouse_motion_toggle(app);
             }
             if (status == FuriStatusOk)
             {

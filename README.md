@@ -1,56 +1,121 @@
-# USB Mouse Motion 1.5.3
+# USB Mouse Motion
 
-Menu icon: custom 10x10 monochrome mouse with a sparkle (`usb_mouse_motion.png`).
+A Flipper Zero USB HID application with smooth randomized mouse movement, configurable click bursts, and a rectangular boundary test.
 
-- Area X/Y: full width/height, independently 50..1000 relative HID counts (not pixels).
-  Bounds are [-X/2,+X/2] and [-Y/2,+Y/2] about the fixed center.
-- Short Left/Right: decrease/increase the selected dimension by 50.
-- Long Left: select X; Long Right: select Y. The selected value is in brackets.
-- Up/Down: interval 1..99 seconds.
-- Short OK: left/right button for the next burst. Long OK: start/pause. Back: exit.
-- Double OK (within 350 ms): interrupt normal operation, travel to the boundary,
-  trace the rectangular boundary of the selected dimensions, then return to the fixed center.
-  The test uses the configured minimum moving speed (314 HID counts/second),
-  sends no mouse clicks, and finishes paused. Duration depends on the path length.
-  Long OK can stop the test; Back exits. A single OK is delayed 350 ms to distinguish
-  it from a double tap. Dimension changes during a test apply to the next run.
-- Starts paused. Dimensions/interval changes apply next cycle. A burst uses one button throughout.
+Current version: **1.6.0**. Starts paused. Settings reset when the app closes.
 
-Each cycle generates a new spline through random waypoints within the chosen rectangle.
-A small correction near the end finishes approximately 1..5 HID counts from a fixed
-origin established when the application opens. Every successful movement updates the
-tracked offset, including partial paths before pause, so subsequent paths begin at the
-actual tracked offset and endpoint errors do not accumulate across cycles or pauses.
-After shrinking a dimension below the current offset, one recovery path starts at the
-old position; subsequent paths fit the new rectangle. The origin persists until app exit.
-These are relative HID bounds: host acceleration, screen clipping, physical mouse
-movement and disconnects can change the on-screen position independently.
-Uneven timing slows the beginning/end, varies intermediate speed and adds a short pause
-when the duration budget allows. Movements use 64 or 128 samples, at least 2 ms apart.
-The initial duration target is 25..95% of available time after a random start,
-reserving the planned click burst and 40 ms scheduling margin. Per-moving-segment
-timing is then clamped to static limits in `motion_timing.h`: `MOTION_SPEED_MIN=314`
-and `MOTION_SPEED_MAX=700`, in relative HID counts per second. The first move also
-waits its calculated travel time. Zero-distance samples use 2 ms. An explicit random
-40..120 ms pause is excluded from the moving-speed limits.
-Speed limits take precedence over the duration target. If even the fastest permitted
-movement plus clicks cannot fit the selected interval, that cycle is extended and
-starts immediately. Long intervals leave additional idle time instead of slowing
-motion below the minimum speed. OS acceleration changes pixel speed; these limits
-are configurable starting values, not a validated model of human motion. Host and
-firmware scheduling can affect actual speed and cycle duration.
-The double-OK perimeter test calculates each movement delay from its distance at
-`MOTION_SPEED_MIN`, rounded to milliseconds with a 2 ms USB floor, without random pauses.
+## Features
 
-The path ends with a random burst of 1..3 clicks: each press 25..60 ms, gaps 50..90 ms.
-Host settings may interpret these as double/triple clicks. Stop/exit releases a pressed
-button. USB failures pause the app. Host acceleration and screen clipping affect the path.
+- Independent X/Y dimensions around a fixed center, with tracked offsets to avoid cumulative endpoint drift.
+- Random spline paths, variable movement timing, short pauses, and small endpoint corrections.
+- Random start time within each cycle and a configurable interval up to 99 seconds.
+- Adjustable minimum and maximum moving speeds.
+- Configurable left/right click bursts, including movement-only operation.
+- Boundary tests at minimum speed, maximum speed, or a fixed 2-second duration.
+- Scrolling settings list and a custom mouse-with-sparkle icon.
 
-USB identity: VID 046D, PID C52B, Logitech, USB Receiver, from the user's receiver.
-The firmware's combined keyboard/mouse HID descriptor is used; it does not reproduce
-that receiver's descriptors or establish undetectability.
+## Controls
 
-Build: `ufbt` here, or `./fbt fap_usb_mouse_motion` in a complete firmware checkout.
+| Button | Action |
+| --- | --- |
+| Up / Down | Select a setting; scrolls automatically |
+| Left / Right | Change the selected value |
+| Hold Left / Right | Repeat value changes; speed values change in steps of 25 |
+| Single OK | Start / pause, after a 350 ms double-tap detection window |
+| Double OK | Run the boundary test, then return to pause |
+| Back | Exit and restore the previous USB configuration |
+
+Holding OK is not required. The test interrupts normal operation, sends no clicks, traces the rectangular perimeter, and returns to the tracked center.
+
+## Settings
+
+| Setting | Range / options | Default |
+| --- | --- | --- |
+| X width | 50–1000 HID counts, step 50 | 200 |
+| Y height | 50–1000 HID counts, step 50 | 200 |
+| Interval | 1–99 seconds | 10 seconds |
+| Minimum speed | 50–2000 HID counts/second | 314 |
+| Maximum speed | 50–2000 HID counts/second | 700 |
+| Mouse button | Left / Right | Right |
+| Minimum clicks | 0–10 | 1 |
+| Maximum clicks | 0–10 | 3 |
+| Test mode | Min speed / Max speed / Standard | Standard |
+
+Minimum values cannot exceed their corresponding maximum values. A short Left/Right changes a speed by 1. Set both click counts to **0** for movement only. Each cycle randomly chooses its click count within the selected range; zero skips clicking. Presses last 25–60 ms with 50–90 ms gaps, which the host may interpret as double/triple clicks.
+
+X/Y are the **full width and height**, not radii. For example, X=400 and Y=200 gives relative bounds of ±200 horizontally and ±100 vertically.
+
+Movement settings and click counts apply to the next cycle. The selected button applies to the next burst and stays unchanged throughout that burst. A running test keeps the settings captured at its start.
+
+## Timing and position
+
+The initial movement-duration target is randomly chosen from 25–95% of the available time after the random start, reserving the planned click burst and a 40 ms scheduling margin. Moving-speed limits take priority over that target. If movement and clicks cannot fit the selected interval, the cycle extends rather than exceeding its planned maximum speed. Long intervals leave idle time instead of forcing slower movement.
+
+Paths use 64 or 128 samples with a 2 ms minimum USB spacing and an explicit 40–120 ms pause. Small quantized steps cannot always represent the selected speed exactly. Speed-based tests use distance-derived delays without random pauses. Standard test mode schedules the complete perimeter-and-return path over approximately 2 seconds.
+
+The origin is fixed when the application opens. Successful HID reports update the tracked position, including partial paths interrupted by pause. Small endpoint errors are measured against that origin instead of accumulating between cycles. If the area is reduced below the current offset, one recovery path starts from the old position before subsequent paths fit the new area.
+
+**HID counts are not screen pixels.** Host acceleration, screen edges, manual mouse movement, USB disconnects, and runtime scheduling can change the on-screen path or timing. This is not a validated model of human motion or a guarantee of undetectability.
+
+## Build
+
+### Standalone with uFBT
+
+From the repository root:
+
+```sh
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install ufbt
+ufbt
+```
+
+Output: `dist/usb_mouse_motion.fap`.
+
+### Inside a firmware checkout
+
+From the root of a complete Flipper Zero firmware checkout:
+
+```sh
+git clone https://github.com/KyrylsPlayground/flipper-usb-mouse-motion.git applications_user/usb_mouse_motion
+./fbt fap_usb_mouse_motion
+```
+
+Copy the resulting `.fap` to the Flipper SD card's `apps/USB` directory and launch it from the device. Connect Flipper to the target computer with a USB data cable.
+
+The recorded builds used **target F7, API 88.2**. Hardware/host behavior has not been verified in this development session.
+
+## USB identity
+
+Configured identity: **VID 046D, PID C52B**, manufacturer `Logitech`, product `USB Receiver`, copied from the user's receiver. The application uses the firmware's standard combined keyboard/mouse HID descriptor. These identifiers do not reproduce that receiver's descriptors or behavior; the project is not affiliated with Logitech.
+
+## Source layout
+
+- `usb_mouse_motion.c`: application lifecycle, input, rendering, and HID state machine.
+- `motion_settings.c/.h`: menu selection, setting ranges, and defaults.
+- `motion_path.c/.h`: random spline paths, bounds, and perimeter test paths.
+- `motion_timing.c/.h`: random scheduling and distance/speed-based timing.
+- `motion_tap.h`: single/double-tap recognition.
+- `application.fam`: Flipper application manifest.
+- `usb_mouse_motion.png`: 10×10 monochrome menu icon.
+
+## Development history
+
+The version commits were created retrospectively by replaying recorded edits from the development conversation. Their source snapshots preserve the recorded iterations; Git commit timestamps reflect the reconstruction, not the original editing times. The earlier, separate USB HID Autofire customization is not part of this application's history.
+
+| Version | Change |
+| --- | --- |
+| 1.0.0 | Separate app, random closed paths, radius/interval/button controls, receiver identity |
+| 1.1.0 | Random movement duration within 25–95% of remaining time |
+| 1.2.0 | Spline paths, uneven timing, pauses, endpoint error, 1–3 click bursts |
+| 1.2.1 | Fixed origin and tracked position prevent cumulative endpoint drift |
+| 1.3.0 | Double-OK boundary test and return to pause |
+| 1.4.0 | Rectangular bounds with independent X/Y dimensions |
+| 1.5.0 | Interval up to 99 seconds and moving-speed limits of 100–700 |
+| 1.5.1 | Minimum speed 200; boundary test at minimum speed |
+| 1.5.2 | Mouse-with-sparkle menu icon |
+| 1.5.3 | Minimum speed 314 |
+| 1.6.0 | Scrolling settings list, adjustable speeds/click counts, three test modes, single-OK start/pause |
 
 ## License
 

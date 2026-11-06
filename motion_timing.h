@@ -2,9 +2,6 @@
 
 #include "motion_path.h"
 
-#define MOTION_SPEED_MIN 314U
-#define MOTION_SPEED_MAX 700U
-
 typedef struct
 {
     uint32_t duration_ms;
@@ -32,6 +29,6 @@ void motion_timing_offsets(
 
 MotionSpeedTiming motion_timing_speed_offsets(
     const MotionPath* path, uint16_t stride, uint32_t target_ms,
-    uint32_t* offsets_ms, uint32_t seed);
+    uint32_t* offsets_ms, uint32_t seed, uint16_t min_speed, uint16_t max_speed);
 
-uint32_t motion_timing_test_offsets(const MotionPath* path, uint32_t* offsets_ms);
+uint32_t motion_timing_test_offsets(const MotionPath* path, uint32_t* offsets_ms, uint16_t speed);
