@@ -6,9 +6,9 @@
 #include "motion_timing.h"
 #include "motion_tap.h"
 
-#define RADIUS_MIN 25U
-#define RADIUS_MAX 500U
-#define RADIUS_STEP 25U
+#define SIZE_MIN 50U
+#define MOTION_SIZE_MAX 1000U
+#define SIZE_STEP 50U
 #define INTERVAL_MIN 1U
 #define INTERVAL_MAX 30U
 #define DOUBLE_TAP_MS 350U
@@ -30,7 +30,8 @@ typedef struct
     ViewPort* viewport;
     MotionPath path;
     MotionPoint position;
-    uint16_t radius;
+    MotionArea area;
+    bool edit_y;
     uint8_t interval;
     uint8_t button;
     uint8_t pressed_button;
@@ -70,13 +71,20 @@ static void mouse_motion_draw(Canvas* canvas, void* context)
     snprintf(text, sizeof(text), "%s  USB:%s", status,
              furi_hal_hid_is_connected() ? "ON" : "OFF");
     canvas_draw_str(canvas, 0, 21, text);
-    snprintf(text, sizeof(text), "< > Radius: %u", app->radius);
+    if (app->edit_y)
+    {
+        snprintf(text, sizeof(text), "X:%u  Y:[%u]", app->area.width, app->area.height);
+    }
+    else
+    {
+        snprintf(text, sizeof(text), "X:[%u]  Y:%u", app->area.width, app->area.height);
+    }
     canvas_draw_str(canvas, 0, 32, text);
     snprintf(text, sizeof(text), "Up/Down Interval: %us", app->interval);
     canvas_draw_str(canvas, 0, 42, text);
-    snprintf(text, sizeof(text), "OK: %s (1-3 clicks)", app->button == HID_MOUSE_BTN_LEFT ? "Left" : "Right");
+    snprintf(text, sizeof(text), "OK:%s 2x:test (1-3)", app->button == HID_MOUSE_BTN_LEFT ? "Left" : "Right");
     canvas_draw_str(canvas, 0, 52, text);
-    canvas_draw_str(canvas, 0, 63, "Hold:run 2x:test Back:exit");
+    canvas_draw_str(canvas, 0, 63, "Hold <>:axis OK:run/pause");
     furi_mutex_release(app->mutex);
 }
 
@@ -104,7 +112,7 @@ static void mouse_motion_begin_test(MouseMotion* app)
     {
         return;
     }
-    motion_path_generate_test(&app->path, app->radius, app->position);
+    motion_path_generate_test(&app->path, app->area, app->position);
     app->running = true;
     app->testing = true;
     app->phase = MotionPhaseMove;
@@ -125,7 +133,7 @@ static uint32_t mouse_motion_remaining(uint32_t deadline, uint32_t now)
 
 static void mouse_motion_begin_window(MouseMotion* app)
 {
-    motion_path_generate(&app->path, app->radius, app->position, furi_hal_random_get());
+    motion_path_generate(&app->path, app->area, app->position, furi_hal_random_get());
     const uint32_t interval_ms = app->interval * 1000U;
     const uint32_t window_ticks = furi_ms_to_ticks(interval_ms);
     app->click_count = 1U + furi_hal_random_get() % 3U;
@@ -274,15 +282,23 @@ static bool mouse_motion_handle_input(MouseMotion* app, const InputEvent* input)
             }
         }
     }
+    else if (input->type == InputTypeLong && (input->key == InputKeyLeft || input->key == InputKeyRight))
+    {
+        app->edit_y = input->key == InputKeyRight;
+    }
     else if (input->type == InputTypeShort || input->type == InputTypeRepeat)
     {
-        if (input->key == InputKeyLeft && app->radius > RADIUS_MIN)
+        uint16_t* size = app->edit_y ? &app->area.height : &app->area.width;
+        if (input->type == InputTypeShort)
         {
-            app->radius -= RADIUS_STEP;
-        }
-        if (input->key == InputKeyRight && app->radius < RADIUS_MAX)
-        {
-            app->radius += RADIUS_STEP;
+            if (input->key == InputKeyLeft && *size > SIZE_MIN)
+            {
+                *size -= SIZE_STEP;
+            }
+            if (input->key == InputKeyRight && *size < MOTION_SIZE_MAX)
+            {
+                *size += SIZE_STEP;
+            }
         }
         if (input->key == InputKeyUp && app->interval < INTERVAL_MAX)
         {
@@ -300,7 +316,10 @@ int32_t usb_mouse_motion_app(void* context)
 {
     UNUSED(context);
     MouseMotion* app = calloc(1, sizeof(MouseMotion));
-    app->radius = 100U;
+    app->area = (MotionArea)
+    {
+        200U, 200U
+    };
     app->interval = 10U;
     app->button = HID_MOUSE_BTN_RIGHT;
     app->queue = furi_message_queue_alloc(16, sizeof(InputEvent));

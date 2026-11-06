@@ -1,22 +1,25 @@
-# USB Mouse Motion 1.3.0
+# USB Mouse Motion 1.4.0
 
-- Left/Right: radius 25..500 relative HID counts (not screen pixels).
+- Area X/Y: full width/height, independently 50..1000 relative HID counts (not pixels).
+  Bounds are [-X/2,+X/2] and [-Y/2,+Y/2] about the fixed center.
+- Short Left/Right: decrease/increase the selected dimension by 50.
+- Long Left: select X; Long Right: select Y. The selected value is in brackets.
 - Up/Down: interval 1..30 seconds.
 - Short OK: left/right button for the next burst. Long OK: start/pause. Back: exit.
 - Double OK (within 350 ms): interrupt normal operation, travel to the boundary,
-  trace the circular boundary of the selected radius, then return to the fixed center.
+  trace the rectangular boundary of the selected dimensions, then return to the fixed center.
   The test takes approximately 2 seconds, sends no mouse clicks, and finishes paused.
   Long OK can stop the test; Back exits. A single OK is delayed 350 ms to distinguish
-  it from a double tap. Radius changes during a test apply to the next run.
-- Starts paused. Radius/interval changes apply next cycle. A burst uses one button throughout.
+  it from a double tap. Dimension changes during a test apply to the next run.
+- Starts paused. Dimensions/interval changes apply next cycle. A burst uses one button throughout.
 
-Each cycle generates a new spline through random waypoints within the chosen radius.
+Each cycle generates a new spline through random waypoints within the chosen rectangle.
 A small correction near the end finishes approximately 1..5 HID counts from a fixed
 origin established when the application opens. Every successful movement updates the
 tracked offset, including partial paths before pause, so subsequent paths begin at the
 actual tracked offset and endpoint errors do not accumulate across cycles or pauses.
-After shrinking the radius below the current offset, one recovery path starts at the
-old position; subsequent paths fit the new radius. The origin persists until app exit.
+After shrinking a dimension below the current offset, one recovery path starts at the
+old position; subsequent paths fit the new rectangle. The origin persists until app exit.
 These are relative HID bounds: host acceleration, screen clipping, physical mouse
 movement and disconnects can change the on-screen position independently.
 Uneven timing slows the beginning/end, varies intermediate speed and adds a short pause
