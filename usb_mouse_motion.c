@@ -7,8 +7,11 @@
 #include "motion_timing.h"
 #include "motion_tap.h"
 #include "motion_settings.h"
+#include "motion_persistence.h"
 
 #define DOUBLE_TAP_MS 350U
+#define SETTINGS_SAVE_DELAY_MS 500U
+#define SETTINGS_SAVE_RETRY_MS 2000U
 
 typedef enum
 {
@@ -38,6 +41,9 @@ typedef struct
     uint16_t movement_speed_limit;
     uint16_t movement_constant_speed;
     MotionSettings settings;
+    bool settings_dirty;
+    bool settings_save_error;
+    uint32_t settings_save_deadline;
     uint8_t pressed_button;
     bool running;
     bool testing;
@@ -73,6 +79,10 @@ static void mouse_motion_draw(Canvas* canvas, void* context)
 #endif
     canvas_set_font(canvas, FontSecondary);
     const char* status = app->position.x != 0 || app->position.y != 0 ? "OFF CENTER" : "PAUSED";
+    if (app->settings_save_error)
+    {
+        status = "SAVE ERROR";
+    }
     if (app->running)
     {
         status = app->phase == MotionPhaseCenter ? "CENTERING" : (app->testing ? "TEST" : (app->phase == MotionPhaseMove ? "MOVING" : "WAITING"));
@@ -219,6 +229,24 @@ static void mouse_motion_start_test(MouseMotion* app)
 static uint32_t mouse_motion_remaining(uint32_t deadline, uint32_t now)
 {
     return (int32_t)(deadline - now) > 0 ? deadline - now : 0U;
+}
+
+static void mouse_motion_save_settings(MouseMotion* app)
+{
+    furi_mutex_acquire(app->mutex, FuriWaitForever);
+    const bool save_pending = app->settings_dirty && !app->running;
+    const MotionSettings settings = app->settings;
+    furi_mutex_release(app->mutex);
+    if (!save_pending)
+    {
+        return;
+    }
+    const bool saved = motion_settings_save(&settings);
+    furi_mutex_acquire(app->mutex, FuriWaitForever);
+    app->settings_dirty = !saved;
+    app->settings_save_error = !saved;
+    app->settings_save_deadline = furi_get_tick() + furi_ms_to_ticks(SETTINGS_SAVE_RETRY_MS);
+    furi_mutex_release(app->mutex);
 }
 
 static void mouse_motion_begin_window(MouseMotion* app)
@@ -511,6 +539,8 @@ static bool mouse_motion_handle_input(MouseMotion* app, const InputEvent* input)
         {
             motion_settings_adjust(&app->settings, input->key == InputKeyRight ? 1 : -1,
                                    input->type == InputTypeRepeat);
+            app->settings_dirty = true;
+            app->settings_save_deadline = furi_get_tick() + furi_ms_to_ticks(SETTINGS_SAVE_DELAY_MS);
         }
     }
     return true;
@@ -521,6 +551,7 @@ int32_t usb_mouse_motion_app(void* context)
     UNUSED(context);
     MouseMotion* app = calloc(1, sizeof(MouseMotion));
     motion_settings_init(&app->settings);
+    motion_settings_load(&app->settings);
     app->queue = furi_message_queue_alloc(16, sizeof(InputEvent));
     app->mutex = furi_mutex_alloc(FuriMutexTypeNormal);
     app->viewport = view_port_alloc();
@@ -546,6 +577,14 @@ int32_t usb_mouse_motion_app(void* context)
         {
             InputEvent input;
             uint32_t timeout = furi_ms_to_ticks(250U);
+            if (app->settings_dirty && !app->running)
+            {
+                const uint32_t remaining = mouse_motion_remaining(app->settings_save_deadline, furi_get_tick());
+                if (remaining < timeout)
+                {
+                    timeout = remaining;
+                }
+            }
             if (app->ok_tap.pending)
             {
                 const uint32_t remaining = mouse_motion_remaining(app->ok_tap.deadline, furi_get_tick());
@@ -577,6 +616,10 @@ int32_t usb_mouse_motion_app(void* context)
                 mouse_motion_tick(app);
             }
             furi_mutex_release(app->mutex);
+            if (app->settings_dirty && !app->running && mouse_motion_remaining(app->settings_save_deadline, furi_get_tick()) == 0U)
+            {
+                mouse_motion_save_settings(app);
+            }
             view_port_update(app->viewport);
         }
         furi_mutex_acquire(app->mutex, FuriWaitForever);
@@ -588,6 +631,7 @@ int32_t usb_mouse_motion_app(void* context)
         furi_hal_usb_set_config(previous_usb, NULL);
         result = 0;
     }
+    mouse_motion_save_settings(app);
     view_port_free(app->viewport);
     furi_mutex_free(app->mutex);
     furi_message_queue_free(app->queue);

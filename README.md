@@ -2,7 +2,7 @@
 
 A Flipper Zero USB HID application with smooth randomized mouse movement, configurable click bursts, and a rectangular boundary test.
 
-Current version: **1.7.0**. Starts paused. Settings reset when the app closes.
+Current version: **1.8.0**. Settings are restored from the SD card. Starts paused.
 
 ## Features
 
@@ -49,6 +49,21 @@ X/Y are the **full width and height**, not radii. For example, X=400 and Y=200 g
 Odd dimensions use integer bounds that retain the exact selected size: X=501 gives -250..+251. The extra HID count is on the positive side.
 
 Movement settings and click counts apply to the next cycle. The selected button applies to the next burst and stays unchanged throughout that burst. A running test keeps the settings captured at its start.
+
+## Saved settings
+
+All ten configurable parameters are saved to `apps_data/usb_mouse_motion/.settings`
+on the Flipper SD card and restored on the next launch. A save is requested 500 ms
+after the last Left/Right edit while paused. Changes made during movement wait until
+the app pauses; exiting with Back also flushes pending changes. Storage writes never
+run during movement or centering. Failed saves show SAVE ERROR while paused and retry
+after 2 seconds.
+
+The file has a type/version header and validated numeric ranges. Missing or invalid
+settings fall back to defaults. Writing uses a temporary `.settings.tmp`; a complete
+temporary file can be loaded if replacing the main file failed and left it unreadable.
+The selected menu row, running state, cursor offset and random trajectory are not
+persisted. Each launch starts paused with a new origin at the current pointer position.
 
 ## Timing and position
 
@@ -128,6 +143,7 @@ Configured identity: **VID 046D, PID C52B**, manufacturer `Logitech`, product `U
 
 - `usb_mouse_motion.c`: application lifecycle, input, rendering, and HID state machine.
 - `motion_settings.c/.h`: menu selection, setting ranges, and defaults.
+- `motion_persistence.c/.h`: validated settings loading and SD-card saving.
 - `motion_path.c/.h`: random spline paths, bounds, and perimeter test paths.
 - `motion_timing.c/.h`: random scheduling and distance/speed-based timing.
 - `motion_tap.h`: single/double-tap recognition.
@@ -155,6 +171,7 @@ The version commits were created retrospectively by replaying recorded edits fro
 | 1.6.2 | Offset-relative path bounds; return to center before pause, resume, and boundary tests |
 | 1.6.3 | Dimension step 1 / hold-repeat 25 and exact odd-sized rectangular bounds |
 | 1.7.0 | Four work-speed modes, no catch-up bursts, uniform corrective speed, and visible tracked offsets |
+| 1.8.0 | Save and restore settings on the SD card; paused autosave and exit flush |
 
 ## License
 
