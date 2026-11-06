@@ -1,4 +1,5 @@
 #include "motion_timing.h"
+#include <math.h>
 
 MotionTiming motion_timing_plan(
     uint32_t interval_ticks,
@@ -21,6 +22,57 @@ MotionTiming motion_timing_plan(
                               ? 1U
                               : 2U;
     return timing;
+}
+
+MotionSpeedTiming motion_timing_speed_offsets(
+    const MotionPath* path, uint16_t stride, uint32_t target_ms,
+    uint32_t* offsets_ms, uint32_t seed)
+{
+    const uint16_t reports = MOTION_PATH_STEPS / stride;
+    uint32_t proposed[MOTION_PATH_STEPS];
+    motion_timing_offsets(proposed, reports, target_ms, 2U, 0U, seed);
+    if (seed == 0U)
+    {
+        seed = 1U;
+    }
+    MotionSpeedTiming result =
+    {
+        .duration_ms = 0U,
+        .pause_ms = 40U + seed % 81U,
+        .pause_index = 1U + (seed >> 8) % (reports - 2U),
+    };
+    for (uint16_t i = 0U; i < reports; i++)
+    {
+        const MotionPoint from = path->points[i * stride];
+        const MotionPoint to = path->points[(i + 1U) * stride];
+        const float distance = hypotf((float)(to.x - from.x), (float)(to.y - from.y));
+        uint32_t minimum_ms = (uint32_t)ceilf(distance * 1000.0f / MOTION_SPEED_MAX);
+        uint32_t maximum_ms = (uint32_t)floorf(distance * 1000.0f / MOTION_SPEED_MIN);
+        if (minimum_ms < 2U)
+        {
+            minimum_ms = 2U;
+        }
+        if (maximum_ms < minimum_ms)
+        {
+            maximum_ms = minimum_ms;
+        }
+        uint32_t delay = i == 0U ? proposed[1] : proposed[i] - proposed[i - 1U];
+        if (delay < minimum_ms)
+        {
+            delay = minimum_ms;
+        }
+        if (delay > maximum_ms)
+        {
+            delay = maximum_ms;
+        }
+        result.duration_ms += delay;
+        if (i == result.pause_index)
+        {
+            result.duration_ms += result.pause_ms;
+        }
+        offsets_ms[i] = result.duration_ms;
+    }
+    return result;
 }
 
 static uint32_t motion_timing_random(uint32_t* seed)

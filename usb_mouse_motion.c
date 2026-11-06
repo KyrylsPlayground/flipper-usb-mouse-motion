@@ -10,7 +10,7 @@
 #define MOTION_SIZE_MAX 1000U
 #define SIZE_STEP 50U
 #define INTERVAL_MIN 1U
-#define INTERVAL_MAX 30U
+#define INTERVAL_MAX 99U
 #define DOUBLE_TAP_MS 350U
 #define TEST_DURATION_MS 2000U
 
@@ -155,16 +155,27 @@ static void mouse_motion_begin_window(MouseMotion* app)
         furi_ms_to_ticks(2U),
         furi_hal_random_get(),
         furi_hal_random_get());
-    const uint32_t now = furi_get_tick();
-    app->window_end = now + window_ticks;
-    app->motion_start = now + timing.offset_ticks;
-    app->motion_duration = timing.duration_ticks;
     app->point_stride = timing.point_stride;
-    motion_timing_offsets(
-        app->motion_offsets, MOTION_PATH_STEPS / app->point_stride,
-        app->motion_duration, furi_ms_to_ticks(2U), furi_ms_to_ticks(120U),
-        furi_hal_random_get());
-    app->deadline = app->motion_start;
+    const uint32_t target_ms = (uint64_t)timing.duration_ticks * 1000U /
+                               furi_kernel_get_tick_frequency();
+    const MotionSpeedTiming speed = motion_timing_speed_offsets(
+        &app->path, app->point_stride, target_ms, app->motion_offsets, furi_hal_random_get());
+    const uint16_t reports = MOTION_PATH_STEPS / app->point_stride;
+    for (uint16_t i = 0U; i < reports; i++)
+    {
+        app->motion_offsets[i] = furi_ms_to_ticks(app->motion_offsets[i]);
+    }
+    app->motion_duration = furi_ms_to_ticks(speed.duration_ms);
+    const uint32_t busy_ticks = app->motion_duration + click_ticks;
+    const uint32_t cycle_ticks = busy_ticks > window_ticks ? busy_ticks : window_ticks;
+    const uint32_t latest_start = cycle_ticks - busy_ticks;
+    const uint32_t offset = timing.offset_ticks <= latest_start
+                                ? timing.offset_ticks
+                                : furi_hal_random_get() % (latest_start + 1U);
+    const uint32_t now = furi_get_tick();
+    app->window_end = now + cycle_ticks;
+    app->motion_start = now + offset;
+    app->deadline = app->motion_start + app->motion_offsets[0];
     app->phase = MotionPhaseWait;
     app->step = 0U;
 }
@@ -247,8 +258,7 @@ static void mouse_motion_tick(MouseMotion* app)
     else
     {
         const uint32_t reports_sent = app->step / app->point_stride;
-        app->deadline = app->motion_start +
-                        app->motion_offsets[reports_sent];
+        app->deadline = app->motion_start + app->motion_offsets[reports_sent];
     }
 }
 
