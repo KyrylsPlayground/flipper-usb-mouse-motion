@@ -12,7 +12,6 @@
 #define INTERVAL_MIN 1U
 #define INTERVAL_MAX 99U
 #define DOUBLE_TAP_MS 350U
-#define TEST_DURATION_MS 2000U
 
 typedef enum
 {
@@ -119,11 +118,12 @@ static void mouse_motion_begin_test(MouseMotion* app)
     app->step = 0U;
     app->point_stride = 1U;
     app->motion_start = furi_get_tick();
-    app->deadline = app->motion_start;
+    app->motion_duration = furi_ms_to_ticks(motion_timing_test_offsets(&app->path, app->motion_offsets));
     for (uint16_t i = 0U; i < MOTION_PATH_STEPS; i++)
     {
-        app->motion_offsets[i] = furi_ms_to_ticks(TEST_DURATION_MS) * i / (MOTION_PATH_STEPS - 1U);
+        app->motion_offsets[i] = furi_ms_to_ticks(app->motion_offsets[i]);
     }
+    app->deadline = app->motion_start + app->motion_offsets[0];
 }
 
 static uint32_t mouse_motion_remaining(uint32_t deadline, uint32_t now)

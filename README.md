@@ -1,4 +1,4 @@
-# USB Mouse Motion 1.5.0
+# USB Mouse Motion 1.5.1
 
 - Area X/Y: full width/height, independently 50..1000 relative HID counts (not pixels).
   Bounds are [-X/2,+X/2] and [-Y/2,+Y/2] about the fixed center.
@@ -8,7 +8,8 @@
 - Short OK: left/right button for the next burst. Long OK: start/pause. Back: exit.
 - Double OK (within 350 ms): interrupt normal operation, travel to the boundary,
   trace the rectangular boundary of the selected dimensions, then return to the fixed center.
-  The test takes approximately 2 seconds, sends no mouse clicks, and finishes paused.
+  The test uses the configured minimum moving speed (200 HID counts/second),
+  sends no mouse clicks, and finishes paused. Duration depends on the path length.
   Long OK can stop the test; Back exits. A single OK is delayed 350 ms to distinguish
   it from a double tap. Dimension changes during a test apply to the next run.
 - Starts paused. Dimensions/interval changes apply next cycle. A burst uses one button throughout.
@@ -26,7 +27,7 @@ Uneven timing slows the beginning/end, varies intermediate speed and adds a shor
 when the duration budget allows. Movements use 64 or 128 samples, at least 2 ms apart.
 The initial duration target is 25..95% of available time after a random start,
 reserving the planned click burst and 40 ms scheduling margin. Per-moving-segment
-timing is then clamped to static limits in `motion_timing.h`: `MOTION_SPEED_MIN=100`
+timing is then clamped to static limits in `motion_timing.h`: `MOTION_SPEED_MIN=200`
 and `MOTION_SPEED_MAX=700`, in relative HID counts per second. The first move also
 waits its calculated travel time. Zero-distance samples use 2 ms. An explicit random
 40..120 ms pause is excluded from the moving-speed limits.
@@ -36,7 +37,8 @@ starts immediately. Long intervals leave additional idle time instead of slowing
 motion below the minimum speed. OS acceleration changes pixel speed; these limits
 are configurable starting values, not a validated model of human motion. Host and
 firmware scheduling can affect actual speed and cycle duration.
-The double-OK perimeter test keeps its separate approximately 2-second timing.
+The double-OK perimeter test calculates each movement delay from its distance at
+`MOTION_SPEED_MIN`, rounded to milliseconds with a 2 ms USB floor, without random pauses.
 
 The path ends with a random burst of 1..3 clicks: each press 25..60 ms, gaps 50..90 ms.
 Host settings may interpret these as double/triple clicks. Stop/exit releases a pressed

@@ -1,6 +1,25 @@
 #include "motion_timing.h"
 #include <math.h>
 
+uint32_t motion_timing_test_offsets(const MotionPath* path, uint32_t* offsets_ms)
+{
+    uint32_t duration_ms = 0U;
+    for (uint16_t i = 0U; i < MOTION_PATH_STEPS; i++)
+    {
+        const MotionPoint from = path->points[i];
+        const MotionPoint to = path->points[i + 1U];
+        const float distance = hypotf((float)(to.x - from.x), (float)(to.y - from.y));
+        uint32_t delay = (uint32_t)lroundf(distance * 1000.0f / MOTION_SPEED_MIN);
+        if (delay < 2U)
+        {
+            delay = 2U;
+        }
+        duration_ms += delay;
+        offsets_ms[i] = duration_ms;
+    }
+    return duration_ms;
+}
+
 MotionTiming motion_timing_plan(
     uint32_t interval_ticks,
     uint32_t reserve_ticks,
