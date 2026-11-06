@@ -6,6 +6,6 @@ App(
     stack_size=2 * 1024,
     fap_icon="usb_mouse_motion.png",
     fap_category="USB",
-    fap_version="1.6.3",
+    fap_version="1.7.0",
     fap_description="Variable smooth mouse paths and randomized click bursts",
 )

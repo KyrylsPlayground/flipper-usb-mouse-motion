@@ -2,7 +2,7 @@
 
 A Flipper Zero USB HID application with smooth randomized mouse movement, configurable click bursts, and a rectangular boundary test.
 
-Current version: **1.6.3**. Starts paused. Settings reset when the app closes.
+Current version: **1.7.0**. Starts paused. Settings reset when the app closes.
 
 ## Features
 
@@ -25,7 +25,7 @@ Current version: **1.6.3**. Starts paused. Settings reset when the app closes.
 | Double OK | Run the boundary test, then return to pause |
 | Back | Exit and restore the previous USB configuration |
 
-Holding OK is not required. Pause releases the pressed button, returns to the tracked center at the selected minimum speed, then becomes fully paused. The UI shows CENTERING during that return. The test interrupts normal operation, first returns to the same center, then traces the rectangular perimeter without clicks and finishes centered and paused. Its Standard 2-second duration excludes the preceding centering motion.
+Holding OK is not required. Pause releases the pressed button, returns to the tracked center, then becomes fully paused. In constant work-speed modes the return uses the captured speed; Natural uses the selected minimum. Test pre-centering uses its selected minimum/maximum speed (minimum for Standard). The UI shows CENTERING during that return. The test interrupts normal operation, first returns to the same center, then traces the rectangular perimeter without clicks and finishes centered and paused. Its Standard 2-second duration excludes the preceding centering motion.
 
 ## Settings
 
@@ -36,6 +36,7 @@ Holding OK is not required. Pause releases the pressed button, returns to the tr
 | Interval | 1–99 seconds | 10 seconds |
 | Minimum speed | 50–2000 HID counts/second | 314 |
 | Maximum speed | 50–2000 HID counts/second | 700 |
+| Run speed | Natural / Random / Min speed / Max speed | Natural |
 | Mouse button | Left / Right | Right |
 | Minimum clicks | 0–10 | 1 |
 | Maximum clicks | 0–10 | 3 |
@@ -51,9 +52,28 @@ Movement settings and click counts apply to the next cycle. The selected button 
 
 ## Timing and position
 
-The initial movement-duration target is randomly chosen from 25–95% of the available time after the random start, reserving the planned click burst and a 40 ms scheduling margin. Moving-speed limits take priority over that target. If movement and clicks cannot fit the selected interval, the cycle extends rather than exceeding its planned maximum speed. Long intervals leave idle time instead of forcing slower movement.
+Natural mode initially chooses a movement-duration target from 25–95% of the available time after the random start, reserving the planned click burst and a 40 ms scheduling margin. Moving-speed limits take priority over that target. If movement and clicks cannot fit the selected interval, the cycle extends rather than exceeding its planned maximum speed. Long intervals leave idle time instead of forcing slower movement.
 
-Paths use 64 or 128 samples with a 2 ms minimum USB spacing and an explicit 40–120 ms pause. Small quantized steps cannot always represent the selected speed exactly. Speed-based tests use distance-derived delays without random pauses. Standard test mode schedules the complete perimeter-and-return path over approximately 2 seconds.
+Paths use 64 or 128 samples with a 2 ms minimum USB spacing. Run speed selects:
+
+- **Natural**: variable segment timing within the selected limits, including a 40–120 ms pause.
+- **Random**: one uniformly selected speed in the inclusive min/max range for the whole path.
+- **Min speed**: constant selected minimum speed.
+- **Max speed**: constant selected maximum speed.
+
+Constant modes derive delays from segment distance and add no artificial random pause.
+The captured speed is also used for split/corrective moves and pause centering. Changes
+apply to the next cycle. Tiny quantized steps and the USB floor can make the realized
+speed lower than selected. All delays are scheduled from completion of the previous
+HID submission: delayed execution does not catch up by sending a burst of overdue moves.
+Runtime overhead can lengthen a cycle or the nominal 2-second Standard boundary test.
+
+The title shows the installed version, and the status line shows tracked X,Y offsets.
+For diagnosis, a completed pause should show **PAUSED 0,0**. These coordinates track
+successful relative HID submissions, not feedback from the host's screen pointer.
+A screen pointer that remains displaced while this line reads zero requires host-side
+observation of the received reports/pointer transform; it is not proof of a new logical
+origin or of cumulative offset in the application's counter.
 
 The origin is fixed when the application opens and is not shifted between cycles.
 A random endpoint displacement is added to the current tracked offset, then clamped
@@ -134,6 +154,7 @@ The version commits were created retrospectively by replaying recorded edits fro
 | 1.6.1 | Clamp every move to fixed bounds and calculate deltas from the latest tracked offset |
 | 1.6.2 | Offset-relative path bounds; return to center before pause, resume, and boundary tests |
 | 1.6.3 | Dimension step 1 / hold-repeat 25 and exact odd-sized rectangular bounds |
+| 1.7.0 | Four work-speed modes, no catch-up bursts, uniform corrective speed, and visible tracked offsets |
 
 ## License
 

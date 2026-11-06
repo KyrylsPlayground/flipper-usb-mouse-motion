@@ -29,7 +29,23 @@ void motion_settings_init(MotionSettings* settings)
         .max_clicks = 3U,
         .right_button = true,
         .test_mode = MotionTestStandard,
+        .work_mode = MotionWorkNatural,
     };
+}
+
+uint16_t motion_settings_work_speed(const MotionSettings* settings, uint32_t random)
+{
+    switch (settings->work_mode)
+    {
+        case MotionWorkRandom:
+            return settings->min_speed + random % (settings->max_speed - settings->min_speed + 1U);
+        case MotionWorkMinimum:
+            return settings->min_speed;
+        case MotionWorkMaximum:
+            return settings->max_speed;
+        default:
+            return 0U;
+    }
 }
 
 void motion_settings_select(MotionSettings* settings, int direction)
@@ -69,6 +85,9 @@ void motion_settings_adjust(MotionSettings* settings, int direction, bool repeat
             break;
         case MotionItemButton:
             settings->right_button = direction > 0;
+            break;
+        case MotionItemWorkMode:
+            settings->work_mode = (MotionWorkMode)((settings->work_mode + MotionWorkCount + direction) % MotionWorkCount);
             break;
         case MotionItemMinClicks:
             settings->min_clicks = motion_settings_change(

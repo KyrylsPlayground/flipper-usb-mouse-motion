@@ -12,6 +12,7 @@ typedef enum
     MotionItemInterval,
     MotionItemMinSpeed,
     MotionItemMaxSpeed,
+    MotionItemWorkMode,
     MotionItemButton,
     MotionItemMinClicks,
     MotionItemMaxClicks,
@@ -27,6 +28,15 @@ typedef enum
     MotionTestCount,
 } MotionTestMode;
 
+typedef enum
+{
+    MotionWorkNatural,
+    MotionWorkRandom,
+    MotionWorkMinimum,
+    MotionWorkMaximum,
+    MotionWorkCount,
+} MotionWorkMode;
+
 typedef struct
 {
     MotionArea area;
@@ -37,6 +47,7 @@ typedef struct
     uint8_t max_clicks;
     bool right_button;
     MotionTestMode test_mode;
+    MotionWorkMode work_mode;
     MotionItem selected;
     uint8_t first_visible;
 } MotionSettings;
@@ -44,3 +55,4 @@ typedef struct
 void motion_settings_init(MotionSettings* settings);
 void motion_settings_select(MotionSettings* settings, int direction);
 void motion_settings_adjust(MotionSettings* settings, int direction, bool repeat);
+uint16_t motion_settings_work_speed(const MotionSettings* settings, uint32_t random);

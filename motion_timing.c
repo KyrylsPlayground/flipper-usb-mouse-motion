@@ -11,13 +11,19 @@ uint32_t motion_timing_test_offsets(const MotionPath* path, uint32_t* offsets_ms
         }
         return 2000U;
     }
+    return motion_timing_uniform_offsets(path, 1U, offsets_ms, speed);
+}
+
+uint32_t motion_timing_uniform_offsets(const MotionPath* path, uint16_t stride, uint32_t* offsets_ms, uint16_t speed)
+{
     uint32_t duration_ms = 0U;
-    for (uint16_t i = 0U; i < MOTION_PATH_STEPS; i++)
+    const uint16_t reports = MOTION_PATH_STEPS / stride;
+    for (uint16_t i = 0U; i < reports; i++)
     {
-        const MotionPoint from = path->points[i];
-        const MotionPoint to = path->points[i + 1U];
+        const MotionPoint from = path->points[i * stride];
+        const MotionPoint to = path->points[(i + 1U) * stride];
         const float distance = hypotf((float)(to.x - from.x), (float)(to.y - from.y));
-        uint32_t delay = (uint32_t)lroundf(distance * 1000.0f / speed);
+        uint32_t delay = (uint32_t)ceilf(distance * 1000.0f / speed);
         if (delay < 2U)
         {
             delay = 2U;
