@@ -1,4 +1,4 @@
-# USB Mouse Motion 1.2.0
+# USB Mouse Motion 1.2.1
 
 - Left/Right: radius 25..500 relative HID counts (not screen pixels).
 - Up/Down: interval 1..30 seconds.
@@ -6,8 +6,14 @@
 - Starts paused. Radius/interval changes apply next cycle. A burst uses one button throughout.
 
 Each cycle generates a new spline through random waypoints within the chosen radius.
-A small correction near the end finishes 1..5 HID counts from the starting point;
-this deliberately replaces exact closure and can accumulate drift over repeated cycles.
+A small correction near the end finishes approximately 1..5 HID counts from a fixed
+origin established when the application opens. Every successful movement updates the
+tracked offset, including partial paths before pause, so subsequent paths begin at the
+actual tracked offset and endpoint errors do not accumulate across cycles or pauses.
+After shrinking the radius below the current offset, one recovery path starts at the
+old position; subsequent paths fit the new radius. The origin persists until app exit.
+These are relative HID bounds: host acceleration, screen clipping, physical mouse
+movement and disconnects can change the on-screen position independently.
 Uneven timing slows the beginning/end, varies intermediate speed and adds a short pause
 when the duration budget allows. Movements use 64 or 128 samples, at least 2 ms apart.
 Duration remains 25..95% of the available time after the random start, reserving the

@@ -15,4 +15,4 @@ typedef struct
     MotionPoint points[MOTION_PATH_STEPS + 1U];
 } MotionPath;
 
-void motion_path_generate(MotionPath* path, uint16_t radius, uint32_t seed);
+void motion_path_generate(MotionPath* path, uint16_t radius, MotionPoint start, uint32_t seed);

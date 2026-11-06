@@ -25,7 +25,7 @@ static float motion_interpolate(float a, float b, float c, float d, float t)
                    (-a + 3.0f * b - 3.0f * c + d) * t * t * t);
 }
 
-void motion_path_generate(MotionPath* path, uint16_t radius, uint32_t seed)
+void motion_path_generate(MotionPath* path, uint16_t radius, MotionPoint start, uint32_t seed)
 {
     if (seed == 0U)
     {
@@ -35,6 +35,14 @@ void motion_path_generate(MotionPath* path, uint16_t radius, uint32_t seed)
     {
         0
     };
+    anchors[0] = (PathAnchor)
+    {
+        start.x, start.y
+    };
+    // After shrinking the radius while paused, recover from the actual position
+    // without jumping or expanding the previous region.
+    const float start_distance = hypotf(start.x, start.y);
+    const float path_limit = start_distance > radius ? start_distance - 1.0f : radius - 1.0f;
     float angle = motion_random(&seed) * MOTION_TAU;
     const float direction = motion_random(&seed) < 0.5f ? -1.0f : 1.0f;
     for (uint16_t i = 1U; i < PATH_SEGMENTS; i++)
@@ -77,9 +85,9 @@ void motion_path_generate(MotionPath* path, uint16_t radius, uint32_t seed)
             y -= adjustment;
         }
         const float distance = hypotf(x, y);
-        if (distance > radius - 1.0f)
+        if (distance > path_limit)
         {
-            const float scale = (radius - 1.0f) / distance;
+            const float scale = path_limit / distance;
             x *= scale;
             y *= scale;
         }
@@ -88,4 +96,5 @@ void motion_path_generate(MotionPath* path, uint16_t radius, uint32_t seed)
             (int16_t)lroundf(x), (int16_t)lroundf(y)
         };
     }
+    path->points[0] = start;
 }

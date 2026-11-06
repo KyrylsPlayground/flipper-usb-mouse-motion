@@ -26,6 +26,7 @@ typedef struct
     FuriMutex* mutex;
     ViewPort* viewport;
     MotionPath path;
+    MotionPoint position;
     uint16_t radius;
     uint8_t interval;
     uint8_t button;
@@ -97,7 +98,7 @@ static uint32_t mouse_motion_remaining(uint32_t deadline, uint32_t now)
 
 static void mouse_motion_begin_window(MouseMotion* app)
 {
-    motion_path_generate(&app->path, app->radius, furi_hal_random_get());
+    motion_path_generate(&app->path, app->radius, app->position, furi_hal_random_get());
     const uint32_t interval_ms = app->interval * 1000U;
     const uint32_t window_ticks = furi_ms_to_ticks(interval_ms);
     app->click_count = 1U + furi_hal_random_get() % 3U;
@@ -194,6 +195,7 @@ static void mouse_motion_tick(MouseMotion* app)
         mouse_motion_stop(app);
         return;
     }
+    app->position = next;
     app->step += app->point_stride;
     if (app->step == MOTION_PATH_STEPS)
     {
