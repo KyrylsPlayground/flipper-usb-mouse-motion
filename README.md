@@ -1,4 +1,4 @@
-# USB Mouse Motion 1.0.0
+# USB Mouse Motion 1.1.0
 
 - Left/Right: radius 25..500 relative HID counts (host acceleration and screen edges affect pixels).
 - Up/Down: interval 1..30 seconds.
@@ -7,9 +7,12 @@
 - Radius and interval changes apply to the next cycle. Click selection applies to the next click.
 
 Each interval contains one new smooth, randomly shaped closed path and one click.
-The start time is random within the time left after reserving movement and click time.
-Movement adapts to short intervals: approximately 0.4 seconds at 1 second,
-approximately 2 seconds at intervals of 5 seconds or longer.
+The start time is random; enough time is reserved for movement, a 40 ms click,
+and a 40 ms scheduling margin. Movement duration is randomly chosen between
+25% and 95% of the time remaining after that start and the click/margin reservation.
+Short movements use 64 samples; longer movements use 128 samples. USB reports
+are scheduled at least 2 ms apart. Late start times are limited so even the
+25% case can complete the path smoothly within the interval.
 The requested radius bounds the path relative to its starting position.
 Stop interrupts motion immediately; completing a path returns the relative HID offset to zero.
 USB failures pause the application. Host acceleration/clipping can prevent an exact on-screen return.

@@ -3,6 +3,7 @@
 #include <gui/gui.h>
 #include <input/input.h>
 #include "motion_path.h"
+#include "motion_timing.h"
 
 #define RADIUS_MIN 25U
 #define RADIUS_MAX 500U
@@ -34,7 +35,9 @@ typedef struct
     uint16_t step;
     uint32_t deadline;
     uint32_t window_end;
-    uint32_t step_ticks;
+    uint32_t motion_start;
+    uint32_t motion_duration;
+    uint16_t point_stride;
     FuriHalUsbHidConfig usb_config;
 } MouseMotion;
 
@@ -90,23 +93,19 @@ static void mouse_motion_begin_window(MouseMotion* app)
 {
     motion_path_generate(&app->path, app->radius, furi_hal_random_get());
     const uint32_t interval_ms = app->interval * 1000U;
-    uint32_t step_ms = (interval_ms - 100U) / (2U * MOTION_PATH_STEPS);
-    if (step_ms > 16U)
-    {
-        step_ms = 16U;
-    }
-    if (step_ms < 2U)
-    {
-        step_ms = 2U;
-    }
-    app->step_ticks = furi_ms_to_ticks(step_ms);
     const uint32_t window_ticks = furi_ms_to_ticks(interval_ms);
-    const uint32_t busy_ticks = (MOTION_PATH_STEPS - 1U) * app->step_ticks +
-                                furi_ms_to_ticks(CLICK_HOLD_MS + 40U);
-    const uint32_t offset = furi_hal_random_get() % (window_ticks - busy_ticks + 1U);
+    const MotionTiming timing = motion_timing_plan(
+        window_ticks,
+        furi_ms_to_ticks(CLICK_HOLD_MS + 40U),
+        furi_ms_to_ticks(2U),
+        furi_hal_random_get(),
+        furi_hal_random_get());
     const uint32_t now = furi_get_tick();
     app->window_end = now + window_ticks;
-    app->deadline = now + offset;
+    app->motion_start = now + timing.offset_ticks;
+    app->motion_duration = timing.duration_ticks;
+    app->point_stride = timing.point_stride;
+    app->deadline = app->motion_start;
     app->phase = MotionPhaseWait;
     app->step = 0U;
 }
@@ -138,7 +137,7 @@ static void mouse_motion_tick(MouseMotion* app)
 
     app->phase = MotionPhaseMove;
     const MotionPoint previous = app->path.points[app->step];
-    const MotionPoint next = app->path.points[app->step + 1U];
+    const MotionPoint next = app->path.points[app->step + app->point_stride];
     const int16_t dx = next.x - previous.x;
     const int16_t dy = next.y - previous.y;
     if (dx < -127 || dx > 127 || dy < -127 || dy > 127 || !furi_hal_hid_mouse_move((int8_t)dx, (int8_t)dy))
@@ -146,7 +145,7 @@ static void mouse_motion_tick(MouseMotion* app)
         mouse_motion_stop(app);
         return;
     }
-    app->step++;
+    app->step += app->point_stride;
     if (app->step == MOTION_PATH_STEPS)
     {
         app->pressed_button = app->button;
@@ -160,7 +159,10 @@ static void mouse_motion_tick(MouseMotion* app)
     }
     else
     {
-        app->deadline += app->step_ticks;
+        const uint32_t reports_sent = app->step / app->point_stride;
+        const uint32_t report_count = MOTION_PATH_STEPS / app->point_stride;
+        app->deadline = app->motion_start +
+                        app->motion_duration * reports_sent / (report_count - 1U);
     }
 }
 
