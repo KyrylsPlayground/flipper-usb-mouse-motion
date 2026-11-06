@@ -2,7 +2,7 @@
 
 #include "motion_path.h"
 
-#define MOTION_SPEED_MIN 200U
+#define MOTION_SPEED_MIN 314U
 #define MOTION_SPEED_MAX 700U
 
 typedef struct

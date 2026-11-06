@@ -1,4 +1,4 @@
-# USB Mouse Motion 1.5.2
+# USB Mouse Motion 1.5.3
 
 Menu icon: custom 10x10 monochrome mouse with a sparkle (`usb_mouse_motion.png`).
 
@@ -10,7 +10,7 @@ Menu icon: custom 10x10 monochrome mouse with a sparkle (`usb_mouse_motion.png`)
 - Short OK: left/right button for the next burst. Long OK: start/pause. Back: exit.
 - Double OK (within 350 ms): interrupt normal operation, travel to the boundary,
   trace the rectangular boundary of the selected dimensions, then return to the fixed center.
-  The test uses the configured minimum moving speed (200 HID counts/second),
+  The test uses the configured minimum moving speed (314 HID counts/second),
   sends no mouse clicks, and finishes paused. Duration depends on the path length.
   Long OK can stop the test; Back exits. A single OK is delayed 350 ms to distinguish
   it from a double tap. Dimension changes during a test apply to the next run.
@@ -29,7 +29,7 @@ Uneven timing slows the beginning/end, varies intermediate speed and adds a shor
 when the duration budget allows. Movements use 64 or 128 samples, at least 2 ms apart.
 The initial duration target is 25..95% of available time after a random start,
 reserving the planned click burst and 40 ms scheduling margin. Per-moving-segment
-timing is then clamped to static limits in `motion_timing.h`: `MOTION_SPEED_MIN=200`
+timing is then clamped to static limits in `motion_timing.h`: `MOTION_SPEED_MIN=314`
 and `MOTION_SPEED_MAX=700`, in relative HID counts per second. The first move also
 waits its calculated travel time. Zero-distance samples use 2 ms. An explicit random
 40..120 ms pause is excluded from the moving-speed limits.
